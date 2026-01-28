@@ -1,0 +1,49 @@
+name: secure-token-service
+# keeping base as ubuntu for now due to debugging phase
+base: bare
+build-base: ubuntu@24.04
+version: 1.0.4
+summary: Canonical Identity Platform Secure Token Service
+description: >
+  This is the Canonical Identity Platform Secure Token Service used for handling sessions
+license: Apache-2.0
+platforms:
+  amd64: null
+services:
+  secure-token-service:
+    override: replace
+    command: /usr/bin/app serve
+    startup: enabled
+parts:
+  go-build:
+    plugin: go
+    source: .
+    source-type: local
+    build-snaps:
+      - go/1.25/stable
+    build-environment:
+      - CGO_ENABLED: "0"      
+    build-packages:
+      - make
+      - git
+    override-build: |
+      make build
+      install -D -m755 ./bin/app ${CRAFT_PART_INSTALL}/opt/secure-token-service/bin/app
+    organize:
+      opt/secure-token-service/bin/app: usr/bin/app
+      etc/ssl/certs/ca-certificates.crt: etc/ssl/certs/ca-certificates.crt
+    stage-packages:
+      - ca-certificates_data
+      - base-files_var
+      - base-files_chisel
+    prime:
+      - usr/bin/app
+      - etc/ssl/certs/ca-certificates.crt
+
+
+  deb-security-manifest:
+    plugin: make
+    source: https://github.com/canonical/rocks-security-manifest
+    source-type: git
+    source-branch: main
+    override-prime: gen_manifest

@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secure-token-service
+  labels:
+    app: secure-token-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: secure-token-service
+  template:
+    metadata:
+      labels:
+        app: secure-token-service
+    spec:
+      serviceAccountName: secure-token-service
+      containers:
+      - name: secure-token-service
+        image: secure-token-service
+        command: ["/bin/app"]
+        args: ["serve"]
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 9090
+          name: grpc
+        envFrom:
+        - configMapRef:
+            name: secure-token-service-config
+        - secretRef:
+            name: secure-token-service-secret
+        resources:
+          limits:
+            memory: "128Mi"
+            cpu: "500m"
+
