@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    container_name: secure-token-valkey
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+    command: valkey-server --appendonly yes
+    networks:
+      - secure-token-network
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  secure-token-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secure-token-service
+    ports:
+      - "8080:8080"  # HTTP server
+      - "9090:9090"  # gRPC server
+    environment:
+      # Cache (Valkey) configuration
+      CACHE_ADDR: "valkey:6379"
+      CACHE_PASSWORD: ""
+      CACHE_DB: "0"
+      
+      # Server configuration
+      HTTP_PORT: "8080"
+      GRPC_PORT: "9090"
+      
+      # JWT configuration
+      JWT_ISSUER: "session-service"
+      JWT_AUDIENCE: "internal-services"
+      JWT_EXPIRY: "3600"
+      
+      # Database configuration (update as needed)
+      DATABASE_URL: "postgres://postgres:password@postgres:5432/janus?sslmode=disable"
+      
+      # Key paths (will be generated if not exists)
+      PRIVATE_KEY_PATH: "/home/nonroot/keys/private.pem"
+      PUBLIC_KEY_PATH: "/home/nonroot/keys/public.pem"
+    depends_on:
+      valkey:
+        condition: service_healthy
+    networks:
+      - secure-token-network
+    volumes:
+      # Persist RSA keys across container restarts
+      - token_keys:/home/nonroot/keys
+    restart: unless-stopped
+
+  # Optional: PostgreSQL database
+  # Uncomment if you need a database for persistence
+  # postgres:
+  #   image: postgres:16-alpine
+  #   container_name: secure-token-postgres
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: password
+  #     POSTGRES_DB: janus
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   networks:
+  #     - secure-token-network
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 10s
+  #     timeout: 3s
+  #     retries: 3
+
+networks:
+  secure-token-network:
+    driver: bridge
+
+volumes:
+  valkey_data:
+    driver: local
+  token_keys:
+    driver: local
+  # postgres_data:
+  #   driver: local
