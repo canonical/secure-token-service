@@ -24,6 +24,7 @@ type Server struct {
 	jwtIssuer    string
 	jwtAudience  string
 	jwtExpiry    int
+	server       *grpc.Server
 }
 
 // NewServer creates a new gRPC server.
@@ -96,12 +97,19 @@ func (s *Server) Start(port string) error {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	grpcServer := grpc.NewServer()
+	s.server = grpc.NewServer()
 	// TODO: Register the service once proto is generated
 	// RegisterSecurityTokenServiceServer(grpcServer, s)
 
 	log.Printf("gRPC server listening on port %s", port)
-	return grpcServer.Serve(listener)
+	return s.server.Serve(listener)
+}
+
+// Stop gracefully stops the gRPC server.
+func (s *Server) Stop() {
+	if s.server != nil {
+		s.server.GracefulStop()
+	}
 }
 
 // Placeholder types until proto is generated

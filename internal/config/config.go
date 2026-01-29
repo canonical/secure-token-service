@@ -34,6 +34,13 @@ type Config struct {
 	// Cookie Encryption
 	CookieHashKey  string `envconfig:"COOKIE_HASH_KEY" default:"0123456789012345678901234567890123456789012345678901234567890123"` // 64 bytes
 	CookieBlockKey string `envconfig:"COOKIE_BLOCK_KEY" default:"01234567890123456789012345678901"`                                // 32 bytes
+
+	// OIDC Configuration
+	OIDCProviderURL  string   `envconfig:"OIDC_PROVIDER_URL" required:"true"`
+	OIDCClientID     string   `envconfig:"OIDC_CLIENT_ID" required:"true"`
+	OIDCClientSecret string   `envconfig:"OIDC_CLIENT_SECRET" required:"true"`
+	OIDCRedirectURL  string   `envconfig:"OIDC_REDIRECT_URL" required:"true"`
+	OIDCScopes       []string `envconfig:"OIDC_SCOPES" default:"openid,profile,email"`
 }
 
 // Load reads configuration from environment variables.
