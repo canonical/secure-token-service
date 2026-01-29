@@ -1,3 +1,6 @@
+// Copyright 2025 Canonical Ltd
+// SPDX-License-Identifier: AGPL-3.0
+
 package main
 
 import (
@@ -6,14 +9,15 @@ import (
 	"log"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/canonical/secure-token-service/internal/config"
 	"github.com/canonical/secure-token-service/internal/cookie"
 	"github.com/canonical/secure-token-service/internal/session"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
 var (
+	// createCookieCmd represents the create-cookie command
 	createCookieCmd = &cobra.Command{
 		Use:   "create-cookie",
 		Short: "Create a test session and encrypted cookie",
@@ -41,6 +45,7 @@ func init() {
 	rootCmd.AddCommand(createCookieCmd)
 }
 
+// runCreateCookie executes the create-cookie command logic
 func runCreateCookie(cmd *cobra.Command, args []string) error {
 	// Load config
 	cfg, err := config.Load()
