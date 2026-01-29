@@ -1,3 +1,6 @@
+// Copyright 2025 Canonical Ltd
+// SPDX-License-Identifier: AGPL-3.0
+
 package main
 
 import (
@@ -14,6 +17,7 @@ import (
 )
 
 var (
+	// serveCmd represents the serve command
 	serveCmd = &cobra.Command{
 		Use:   "serve",
 		Short: "Start the Secure Token service",
@@ -26,6 +30,7 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 }
 
+// runServe executes the serve command logic
 func runServe(cmd *cobra.Command, args []string) error {
 	log.Println("Starting Session Service (Janus)...")
 

@@ -1,10 +1,13 @@
+// Copyright 2025 Canonical Ltd
+// SPDX-License-Identifier: AGPL-3.0
+
 package cookie_test
 
 import (
 	"testing"
 
-	"github.com/gorilla/securecookie"
 	"github.com/canonical/secure-token-service/internal/cookie"
+	"github.com/gorilla/securecookie"
 )
 
 func TestCookieManager_EncodeDecode(t *testing.T) {

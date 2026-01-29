@@ -1,3 +1,6 @@
+// Copyright 2025 Canonical Ltd
+// SPDX-License-Identifier: AGPL-3.0
+
 package httpserver
 
 import (
@@ -6,10 +9,10 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/canonical/secure-token-service/internal/auth"
 	"github.com/canonical/secure-token-service/internal/session"
+	"github.com/go-chi/chi/v5"
+	"github.com/lestrrat-go/jwx/v2/jwk"
 )
 
 // Server handles HTTP endpoints for OIDC flow and JWKS.
