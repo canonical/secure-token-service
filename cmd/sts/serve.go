@@ -16,6 +16,7 @@ import (
 	"github.com/canonical/secure-token-service/internal/auth"
 	"github.com/canonical/secure-token-service/internal/config"
 	"github.com/canonical/secure-token-service/internal/cookie"
+	"github.com/canonical/secure-token-service/internal/db"
 	grpcserver "github.com/canonical/secure-token-service/internal/grpc"
 	httpserver "github.com/canonical/secure-token-service/internal/http"
 	"github.com/canonical/secure-token-service/internal/session"
@@ -42,15 +43,32 @@ func init() {
 func runServe(cmd *cobra.Command, args []string) error {
 	log.Println("Starting Session Service (Janus)...")
 
+	ctx := context.Background()
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
-	log.Printf("Configuration loaded: HTTP=%s, gRPC=%s", cfg.HTTPPort, cfg.GRPCPort)
+	log.Printf("Configuration loaded: HTTP=%s, gRPC=%s, Database=%s", cfg.HTTPPort, cfg.GRPCPort, cfg.DatabaseURL)
+
+	// Initialize Database
+	database, err := db.NewDB(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
+	}
+	defer database.Close()
+	log.Println("Database connected")
+
+	// NOTE: Migrations are NOT run automatically on startup
+	// Run migrations manually with: ./bin/sts migrate
+
+	// Initialize JWKS Repository
+	jwksRepo := db.NewPostgresJWKSRepository(database.Pool())
+	log.Println("JWKS repository initialized")
 
 	// Initialize Key Manager
-	keyManager, err := auth.NewKeyManager(cfg.PrivateKeyPath, cfg.PublicKeyPath)
+	keyManager, err := auth.NewKeyManager(ctx, jwksRepo)
 	if err != nil {
 		return fmt.Errorf("failed to initialize key manager: %w", err)
 	}
@@ -76,7 +94,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	log.Println("Cookie manager initialized")
 
 	// Initialize OIDC
-	ctx := context.Background()
 	provider, err := oidc.NewProvider(ctx, cfg.OIDCProviderURL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize OIDC provider: %w", err)
@@ -101,7 +118,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Start gRPC server in goroutine
-	grpcSrv := grpcserver.NewServer(sessionStore, keyManager, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTExpiry)
+	grpcSrv := grpcserver.NewServer(sessionStore, keyManager, cookieManager, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTExpiry)
 	go func() {
 		if err := grpcSrv.Start(cfg.GRPCPort); err != nil {
 			log.Printf("gRPC server failed: %v", err)
@@ -115,10 +132,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	log.Printf("Received signal: %v, shutting down...", sig)
 
 	// Shutdown HTTP Server with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := httpSrv.Shutdown(ctx); err != nil {
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("HTTP server forced to shutdown: %v", err)
 	}
 

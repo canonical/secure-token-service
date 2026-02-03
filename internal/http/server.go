@@ -15,7 +15,6 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/lestrrat-go/jwx/v2/jwk"
 )
 
 // Server handles HTTP endpoints for OIDC flow and JWKS.
@@ -243,17 +242,10 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 
 // handleJWKS exposes the public key for JWT verification.
 func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
-	key, err := s.keyManager.GetJWK()
+	// Get all public keys (active + retired) from key manager
+	set, err := s.keyManager.GetAllJWKS()
 	if err != nil {
-		log.Printf("Failed to get JWK: %v", err)
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	// Create a JWK Set containing the public key
-	set := jwk.NewSet()
-	if err := set.AddKey(key); err != nil {
-		log.Printf("Failed to add key to set: %v", err)
+		log.Printf("Failed to get JWKS: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
