@@ -2,20 +2,25 @@ version: '3.8'
 
 services:
   valkey:
-    image: valkey/valkey:7.2-alpine
+    image: valkey/valkey:9-alpine
     container_name: secure-token-valkey
     ports:
       - "6379:6379"
     volumes:
       - valkey_data:/data
     command: valkey-server --appendonly yes
-    networks:
-      - secure-token-network
-    healthcheck:
-      test: ["CMD", "valkey-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: secure-token-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: sts
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
   secure-token-service:
     build:
@@ -39,52 +44,26 @@ services:
       JWT_ISSUER: "session-service"
       JWT_AUDIENCE: "internal-services"
       JWT_EXPIRY: "3600"
+
+      # Cookie Encryption (CHANGE THESE IN PRODUCTION!)
+      COOKIE_HASH_KEY: "0123456789012345678901234567890123456789012345678901234567890123"
+      COOKIE_BLOCK_KEY: "01234567890123456789012345678901"
+
+      # OIDC Configuration (Update with your provider)
+      OIDC_PROVIDER_URL: "https://accounts.google.com"
+      OIDC_CLIENT_ID: "your-client-id"
+      OIDC_CLIENT_SECRET: "your-client-secret"
+      OIDC_REDIRECT_URL: "http://localhost:8080/auth/callback"
       
-      # Database configuration (update as needed)
-      DATABASE_URL: "postgres://postgres:password@postgres:5432/janus?sslmode=disable"
-      
-      # Key paths (will be generated if not exists)
-      PRIVATE_KEY_PATH: "/home/nonroot/keys/private.pem"
-      PUBLIC_KEY_PATH: "/home/nonroot/keys/public.pem"
+      # Database configuration
+      DATABASE_URL: "postgres://postgres:password@postgres:5432/sts?sslmode=disable"
     depends_on:
-      valkey:
-        condition: service_healthy
-    networks:
-      - secure-token-network
-    volumes:
-      # Persist RSA keys across container restarts
-      - token_keys:/home/nonroot/keys
+      - valkey
+      - postgres
     restart: unless-stopped
-
-  # Optional: PostgreSQL database
-  # Uncomment if you need a database for persistence
-  # postgres:
-  #   image: postgres:16-alpine
-  #   container_name: secure-token-postgres
-  #   environment:
-  #     POSTGRES_USER: postgres
-  #     POSTGRES_PASSWORD: password
-  #     POSTGRES_DB: janus
-  #   ports:
-  #     - "5432:5432"
-  #   volumes:
-  #     - postgres_data:/var/lib/postgresql/data
-  #   networks:
-  #     - secure-token-network
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
-  #     interval: 10s
-  #     timeout: 3s
-  #     retries: 3
-
-networks:
-  secure-token-network:
-    driver: bridge
 
 volumes:
   valkey_data:
     driver: local
-  token_keys:
+  postgres_data:
     driver: local
-  # postgres_data:
-  #   driver: local

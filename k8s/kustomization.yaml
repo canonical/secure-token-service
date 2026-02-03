@@ -4,12 +4,13 @@ kind: Kustomization
 resources:
 - deployment.yaml
 - service.yaml
+- serviceaccount.yaml
 - configmap.yaml
 - secret.yaml
+- migration-cronjob.yaml
 
 commonLabels:
   app: secure-token-service
 
 images:
-- name: sts
-  newName: secure-token-service
+- name: secure-token-service
