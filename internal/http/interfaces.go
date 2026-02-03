@@ -16,6 +16,7 @@ import (
 type KeyManager interface {
 	MintToken(subject, issuer, audience string, expirySeconds int, claims map[string]interface{}) (string, error)
 	GetJWK() (jwk.Key, error)
+	GetAllJWKS() (jwk.Set, error)
 }
 
 // AuthCookieManager defines the interface for cookie operations.

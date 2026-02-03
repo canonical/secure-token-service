@@ -4,89 +4,63 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"os"
 	"time"
 
+	"github.com/canonical/secure-token-service/internal/db"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 )
 
-// KeyManager handles RSA key generation and JWT signing.
+// KeyManager handles RSA key generation and JWT signing with database storage.
 type KeyManager struct {
-	privateKey *rsa.PrivateKey
-	publicKey  *rsa.PublicKey
+	repo db.JWKSRepository
+	ctx  context.Context
 }
 
-// NewKeyManager creates a new KeyManager and loads/generates RSA keys.
-func NewKeyManager(privateKeyPath, publicKeyPath string) (*KeyManager, error) {
-	km := &KeyManager{}
+// NewKeyManager creates a new KeyManager that uses database storage.
+func NewKeyManager(ctx context.Context, repo db.JWKSRepository) (*KeyManager, error) {
+	km := &KeyManager{
+		repo: repo,
+		ctx:  ctx,
+	}
 
-	// Try to load existing keys
-	if err := km.loadKeys(privateKeyPath, publicKeyPath); err != nil {
-		// Generate new keys if loading fails
-		if err := km.generateKeys(privateKeyPath, publicKeyPath); err != nil {
-			return nil, fmt.Errorf("failed to generate keys: %w", err)
+	// Check if we have an active key, if not generate one
+	_, err := repo.GetLatestActiveKey(ctx)
+	if err != nil {
+		// No active key exists, generate and save initial  key
+		if err := km.generateAndSaveKey(); err != nil {
+			return nil, fmt.Errorf("failed to generate initial key: %w", err)
 		}
 	}
 
 	return km, nil
 }
 
-// loadKeys loads RSA keys from disk.
-func (km *KeyManager) loadKeys(privateKeyPath, publicKeyPath string) error {
-	// Load private key
-	privateKeyData, err := os.ReadFile(privateKeyPath)
-	if err != nil {
-		return err
-	}
-
-	block, _ := pem.Decode(privateKeyData)
-	if block == nil {
-		return fmt.Errorf("failed to decode private key PEM")
-	}
-
-	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		return fmt.Errorf("failed to parse private key: %w", err)
-	}
-
-	km.privateKey = privateKey
-	km.publicKey = &privateKey.PublicKey
-
-	return nil
-}
-
-// generateKeys generates new RSA keys and saves them to disk.
-func (km *KeyManager) generateKeys(privateKeyPath, publicKeyPath string) error {
+// generateAndSaveKey generates a new RSA key pair and saves it to the database.
+func (km *KeyManager) generateAndSaveKey() error {
 	// Generate 2048-bit RSA key
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return fmt.Errorf("failed to generate RSA key: %w", err)
 	}
 
-	km.privateKey = privateKey
-	km.publicKey = &privateKey.PublicKey
-
-	// Ensure directory exists
-	os.MkdirAll("./keys", 0755)
-
-	// Save private key
+	// Marshal private key to PEM
 	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
 	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: privateKeyBytes,
 	})
-	if err := os.WriteFile(privateKeyPath, privateKeyPEM, 0600); err != nil {
-		return fmt.Errorf("failed to write private key: %w", err)
-	}
 
-	// Save public key
-	publicKeyBytes, err := x509.MarshalPKIXPublicKey(km.publicKey)
+	// Marshal public key to PEM
+	publicKeyBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
 	if err != nil {
 		return fmt.Errorf("failed to marshal public key: %w", err)
 	}
@@ -94,15 +68,88 @@ func (km *KeyManager) generateKeys(privateKeyPath, publicKeyPath string) error {
 		Type:  "PUBLIC KEY",
 		Bytes: publicKeyBytes,
 	})
-	if err := os.WriteFile(publicKeyPath, publicKeyPEM, 0644); err != nil {
-		return fmt.Errorf("failed to write public key: %w", err)
+
+	// Create JWK-style representation with both keys
+	kid := "janus-key-" + uuid.New().String()[:8]
+
+	// Store complete key data as JSONB
+	keyData := map[string]interface{}{
+		"kty":         "RSA",
+		"kid":         kid,
+		"use":         "sig",
+		"alg":         "RS256",
+		"private_pem": string(privateKeyPEM),
+		"public_pem":  string(publicKeyPEM),
+	}
+
+	keyDataJSON, err := json.Marshal(keyData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal key data: %w", err)
+	}
+
+	// Save to database
+	dbKey := &db.JWKSKey{
+		SID:       "public",
+		KID:       kid,
+		Version:   0,
+		KeyData:   keyDataJSON,
+		CreatedAt: time.Now(),
+	}
+
+	if err := km.repo.SaveKey(km.ctx, dbKey); err != nil {
+		return fmt.Errorf("failed to save key to database: %w", err)
 	}
 
 	return nil
 }
 
-// MintToken creates a new internal JWT signed with RS256.
+// getLatestPrivateKey fetches the latest active key and extracts the private key for signing.
+func (km *KeyManager) getLatestPrivateKey() (*rsa.PrivateKey, string, error) {
+	dbKey, err := km.repo.GetLatestActiveKey(km.ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get latest active key: %w", err)
+	}
+
+	// Parse key data
+	var keyData map[string]interface{}
+	if err := json.Unmarshal(dbKey.KeyData, &keyData); err != nil {
+		return nil, "", fmt.Errorf("failed to unmarshal key data: %w", err)
+	}
+
+	// Extract private key PEM
+	privateKeyPEM, ok := keyData["private_pem"].(string)
+	if !ok {
+		return nil, "", fmt.Errorf("private_pem not found in key data")
+	}
+
+	// Extract KID
+	kid, ok := keyData["kid"].(string)
+	if !ok {
+		return nil, "", fmt.Errorf("kid not found in key data")
+	}
+
+	// Decode PEM
+	block, _ := pem.Decode([]byte(privateKeyPEM))
+	if block == nil {
+		return nil, "", fmt.Errorf("failed to decode private key PEM")
+	}
+
+	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to parse private key: %w", err)
+	}
+
+	return privateKey, kid, nil
+}
+
+// MintToken creates a new internal JWT signed with RS256 using the latest active key.
 func (km *KeyManager) MintToken(subject, issuer, audience string, expirySeconds int, claims map[string]interface{}) (string, error) {
+	// ALWAYS get the latest key for signing
+	privateKey, kid, err := km.getLatestPrivateKey()
+	if err != nil {
+		return "", fmt.Errorf("failed to get signing key: %w", err)
+	}
+
 	now := time.Now()
 
 	// Create standard claims
@@ -120,23 +167,76 @@ func (km *KeyManager) MintToken(subject, issuer, audience string, expirySeconds 
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, tokenClaims)
-	return token.SignedString(km.privateKey)
+	token.Header["kid"] = kid // Set KID in JWT header
+
+	return token.SignedString(privateKey)
 }
 
-// GetPublicKey returns the public key for JWKS endpoint.
-func (km *KeyManager) GetPublicKey() *rsa.PublicKey {
-	return km.publicKey
+// GetPublicKey returns the latest active public key.
+func (km *KeyManager) GetPublicKey() (*rsa.PublicKey, error) {
+	dbKey, err := km.repo.GetLatestActiveKey(km.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latest active key: %w", err)
+	}
+
+	// Parse key data
+	var keyData map[string]interface{}
+	if err := json.Unmarshal(dbKey.KeyData, &keyData); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal key data: %w", err)
+	}
+
+	// Extract public key PEM
+	publicKeyPEM, ok := keyData["public_pem"].(string)
+	if !ok {
+		return nil, fmt.Errorf("public_pem not found in key data")
+	}
+
+	// Decode PEM
+	block, _ := pem.Decode([]byte(publicKeyPEM))
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode public key PEM")
+	}
+
+	publicKey, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse public key: %w", err)
+	}
+
+	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("key is not an RSA public key")
+	}
+
+	return rsaPublicKey, nil
 }
 
-// GetJWK returns the public key as a JWK with proper metadata.
+// GetJWK returns the latest active public key as a JWK with proper metadata.
 func (km *KeyManager) GetJWK() (jwk.Key, error) {
-	key, err := jwk.FromRaw(km.publicKey)
+	publicKey, err := km.GetPublicKey()
+	if err != nil {
+		return nil, err
+	}
+
+	dbKey, err := km.repo.GetLatestActiveKey(km.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latest active key: %w", err)
+	}
+
+	// Parse key data for KID
+	var keyData map[string]interface{}
+	if err := json.Unmarshal(dbKey.KeyData, &keyData); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal key data: %w", err)
+	}
+
+	kid, _ := keyData["kid"].(string)
+
+	key, err := jwk.FromRaw(publicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JWK from public key: %w", err)
 	}
 
 	// Set JWK metadata
-	if err := key.Set(jwk.KeyIDKey, "janus-key-1"); err != nil {
+	if err := key.Set(jwk.KeyIDKey, kid); err != nil {
 		return nil, fmt.Errorf("failed to set key ID: %w", err)
 	}
 	if err := key.Set(jwk.AlgorithmKey, "RS256"); err != nil {
@@ -147,4 +247,59 @@ func (km *KeyManager) GetJWK() (jwk.Key, error) {
 	}
 
 	return key, nil
+}
+
+// GetAllJWKS returns all public keys (active + retired) as a JWK Set for the JWKS endpoint.
+func (km *KeyManager) GetAllJWKS() (jwk.Set, error) {
+	dbKeys, err := km.repo.GetAllPublicKeys(km.ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all public keys: %w", err)
+	}
+
+	set := jwk.NewSet()
+
+	for _, dbKey := range dbKeys {
+		// Parse key data
+		var keyData map[string]interface{}
+		if err := json.Unmarshal(dbKey.KeyData, &keyData); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal key data for %s: %w", dbKey.KID, err)
+		}
+
+		// Extract public key PEM
+		publicKeyPEM, ok := keyData["public_pem"].(string)
+		if !ok {
+			continue // Skip keys without public PEM
+		}
+
+		// Decode PEM
+		block, _ := pem.Decode([]byte(publicKeyPEM))
+		if block == nil {
+			continue
+		}
+
+		publicKey, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			continue
+		}
+
+		rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
+		if !ok {
+			continue
+		}
+
+		// Create JWK
+		key, err := jwk.FromRaw(rsaPublicKey)
+		if err != nil {
+			continue
+		}
+
+		kid, _ := keyData["kid"].(string)
+		key.Set(jwk.KeyIDKey, kid)
+		key.Set(jwk.AlgorithmKey, "RS256")
+		key.Set(jwk.KeyUsageKey, "sig")
+
+		set.AddKey(key)
+	}
+
+	return set, nil
 }

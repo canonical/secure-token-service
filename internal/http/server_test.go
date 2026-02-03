@@ -32,6 +32,14 @@ func (m *MockKeyManager) GetJWK() (jwk.Key, error) {
 	return m.jwk, m.err
 }
 
+func (m *MockKeyManager) GetAllJWKS() (jwk.Set, error) {
+	set := jwk.NewSet()
+	if m.jwk != nil {
+		set.AddKey(m.jwk)
+	}
+	return set, m.err
+}
+
 type MockCookieManager struct {
 	cookies map[string]string
 	err     error
