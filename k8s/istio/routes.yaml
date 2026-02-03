@@ -1,0 +1,60 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sts-route
+  namespace: default
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: sts-gateway
+    namespace: default
+  hostnames:
+  - "localhost"
+  - "iam.internal.io"
+  rules:
+  # Auth endpoints (/auth/login, /auth/callback, /auth/logout, /auth/sessions)
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /auth/
+    backendRefs:
+    - name: secure-token-service
+      port: 8080
+  # JWKS endpoint (/.well-known/jwks.json)
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /.well-known/
+    backendRefs:
+    - name: secure-token-service
+      port: 8080
+  # Homepage (exact match for /)
+  - matches:
+    - path:
+        type: Exact
+        value: /
+    backendRefs:
+    - name: secure-token-service
+      port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GRPCRoute
+metadata:
+  name: sts-mesh-grpc-route
+  namespace: default
+spec:
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: waypoint
+    namespace: default
+  rules:
+    - matches:
+        - method:
+            service: "sts.v1.SecurityTokenService"
+            method: "ExchangeSession"
+      backendRefs:
+        - name: secure-token-service 
+          port: 9090
+

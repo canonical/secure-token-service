@@ -4,6 +4,7 @@ metadata:
   name: secure-token-service
   labels:
     app: secure-token-service
+    istio.io/use-waypoint: "true"
 spec:
   replicas: 1
   selector:
@@ -18,7 +19,7 @@ spec:
       containers:
       - name: secure-token-service
         image: secure-token-service
-        command: ["/bin/app"]
+        command: ["/usr/bin/app"]
         args: ["serve"]
         ports:
         - containerPort: 8080

@@ -7,5 +7,11 @@ metadata:
 data:
   HTTP_PORT: "8080"
   GRPC_PORT: "9090"
-  CACHE_ADDR: "valkey:6379"
+  CACHE_ADDR: "valkey-primary:6379"
   JWT_ISSUER: "secure-token-service"
+  JWT_AUDIENCE: "internal-services"
+  JWT_EXPIRY: "3600"
+  # OIDC Configuration (non-sensitive)
+  OIDC_PROVIDER_URL: "https://accounts.google.com"
+  OIDC_REDIRECT_URL: "http://localhost:8080/auth/callback"
+

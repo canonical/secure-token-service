@@ -1,0 +1,94 @@
+# apiVersion: security.istio.io/v1
+# kind: AuthorizationPolicy
+# metadata:
+#   name: secure-token-service-ztunnel
+#   namespace: default
+# spec:
+#   selector:
+#     matchLabels:
+#       app: secure-token-service
+#   action: ALLOW
+#   rules:
+#   - from:
+#     - source:
+#         principals:
+#         - cluster.local/ns/default/sa/sts-gateway-istio
+#         - cluster.local/ns/default/sa/authorization-service
+#         - cluster.local/ns/default/sa/waypoint
+# ---
+# apiVersion: security.istio.io/v1
+# kind: AuthorizationPolicy
+# metadata:
+#   name: secure-token-service-allow-auth
+#   namespace: default
+# spec:
+#   # Target the waypoint gateway for L7 policy enforcement
+#   targetRef:
+#     group: gateway.networking.k8s.io
+#     kind: Gateway
+#     name: sts-gateway
+#   # Allow unauthenticated access to /health
+#   action: ALLOW
+#   rules:
+#   - to:
+#     - operation:
+#         paths: ["/auth/*"]
+#         methods: ["GET", "POST"]
+#     - operation:
+#         paths: ["/"]
+#         methods: ["GET", "POST"]        
+#     - operation:
+#         paths: ["/.well-known/jwks.json"]
+#         methods: ["GET"]                
+# ---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: secure-token-service-allow-grpc-mesh
+  namespace: default
+spec:
+  # Target the waypoint gateway for L7 policy enforcement
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: waypoint
+  # Allow unauthenticated access to /health
+  action: ALLOW
+  rules:
+  - to:
+    - operation:
+        paths: ["/sts.v1.SecurityTokenService/ExchangeSession"]
+        methods: ["POST"]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: sts-postgresql-ztunnel
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      "app.kubernetes.io/name": postgresql
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals:
+        - "*"
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: sts-valkey-ztunnel
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      "app.kubernetes.io/name": valkey
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals:
+        - "*"
+---

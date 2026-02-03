@@ -38,31 +38,10 @@ spec:
         spec:
           serviceAccountName: secure-token-service
           restartPolicy: Never
-          
-          # Wait for PostgreSQL to be ready
-          initContainers:
-          - name: wait-for-postgres
-            image: postgres:16-alpine
-            command:
-            - sh
-            - -c
-            - |
-              until pg_isready -h postgresql -p 5432 -U stsuser; do
-                echo "Waiting for PostgreSQL..."
-                sleep 2
-              done
-              echo "PostgreSQL is ready!"
-            env:
-            - name: PGPASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: secure-token-service-secret
-                  key: DATABASE_URL
-          
           containers:
           - name: migrate
             image: secure-token-service
-            command: ["/bin/app"]
+            command: ["/usr/bin/app"]
             args: ["migrate"]
             envFrom:
             - configMapRef:
