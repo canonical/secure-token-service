@@ -7,33 +7,60 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
+	"github.com/canonical/secure-token-service/internal/observability"
 	"github.com/canonical/secure-token-service/internal/session"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
-// Server handles HTTP endpoints for OIDC flow and JWKS.
+// observabilityProvider defines the interface for observability components
+type observabilityProvider interface {
+	GetLogger() interface {
+		FromContext(context.Context) interface{ Info(string, ...interface{}) }
+	}
+	GetMetricsProvider() interface {
+		GetPrometheusHandler() http.Handler
+		RecordSessionCreated(context.Context)
+	}
+	GetTracerProvider() interface{ Tracer() interface{} }
+}
+
 // Server handles HTTP endpoints for OIDC flow and JWKS.
 type Server struct {
 	sessionStore  session.Store
 	keyManager    KeyManager
 	cookieManager AuthCookieManager
 	oidcProvider  OIDCProvider
+	observability *observability.Observability
 	server        *http.Server
 }
 
-// NewServer creates a new HTTP server.
-func NewServer(store session.Store, km KeyManager, cm AuthCookieManager, provider OIDCProvider) *Server {
+// logger returns the zap logger from observability, or creates a new one if not available
+func (s *Server) logger(ctx context.Context) *zap.Logger {
+	if s.observability != nil && s.observability.Logger != nil {
+		return s.observability.Logger.FromContext(ctx)
+	}
+	// Return a new logger if observability is not set up
+	logger, err := observability.NewLogger("info", false)
+	if err != nil {
+		return zap.NewNop()
+	}
+	return logger.Logger
+}
+
+// NewServer creates a new HTTP server with optional observability.
+func NewServer(store session.Store, km KeyManager, cm AuthCookieManager, provider OIDCProvider, obs *observability.Observability) *Server {
 	return &Server{
 		sessionStore:  store,
 		keyManager:    km,
 		cookieManager: cm,
 		oidcProvider:  provider,
+		observability: obs,
 	}
 }
 
@@ -41,7 +68,7 @@ func NewServer(store session.Store, km KeyManager, cm AuthCookieManager, provide
 func (s *Server) Start(port string) error {
 	r := chi.NewRouter()
 
-	// OIDC endpoints (stubs for now)
+	// OIDC endpoints
 	r.Get("/auth/login", s.handleLogin)
 	r.Get("/auth/callback", s.handleCallback)
 	r.Post("/auth/logout", s.handleLogout)
@@ -50,7 +77,55 @@ func (s *Server) Start(port string) error {
 	// JWKS endpoint
 	r.Get("/.well-known/jwks.json", s.handleJWKS)
 
-	log.Printf("HTTP server listening on port %s", port)
+	s.logger(context.Background()).Info("HTTP server starting", zap.String("port", port))
+	s.server = &http.Server{
+		Addr:    fmt.Sprintf(":%s", port),
+		Handler: r,
+	}
+	return s.server.ListenAndServe()
+}
+
+// StartWithMiddleware starts the HTTP server with observability middleware
+func (s *Server) StartWithMiddleware(port string) error {
+	r := chi.NewRouter()
+
+	// Add observability middleware
+	if s.observability != nil {
+		if s.observability.Logger != nil {
+			r.Use(observability.HTTPLoggingMiddleware(s.observability.Logger))
+		}
+		if s.observability.MetricsProvider != nil {
+			r.Use(observability.HTTPMetricsMiddleware(s.observability.MetricsProvider))
+		}
+		if s.observability.TracerProvider != nil {
+			r.Use(observability.HTTPTracingMiddleware(s.observability.TracerProvider.Tracer()))
+		}
+	}
+
+	// Metrics endpoint
+	if s.observability != nil && s.observability.MetricsProvider != nil {
+		s.logger(context.Background()).Info("Metrics endpoint enabled", zap.String("port", port))
+		// Wrap the http.Handler to make it compatible with r.Get which expects http.HandlerFunc
+		metricsHandler := s.observability.MetricsProvider.GetPrometheusHandler()
+		r.Get("/metrics", func(w http.ResponseWriter, r *http.Request) {
+			s.logger(r.Context()).Info("Metrics endpoint hit", zap.String("port", port))
+			metricsHandler.ServeHTTP(w, r)
+		})
+	}
+
+	// Homepage
+	r.Get("/", s.handleHome)
+
+	// OIDC endpoints
+	r.Get("/auth/login", s.handleLogin)
+	r.Get("/auth/callback", s.handleCallback)
+	r.Post("/auth/logout", s.handleLogout)
+	r.Get("/auth/sessions", s.handleSessions)
+
+	// JWKS endpoint
+	r.Get("/.well-known/jwks.json", s.handleJWKS)
+
+	s.logger(context.Background()).Info("HTTP server starting with middleware", zap.String("port", port))
 	s.server = &http.Server{
 		Addr:    fmt.Sprintf(":%s", port),
 		Handler: r,
@@ -74,7 +149,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// 2. Generate and store state
 	state, err := s.cookieManager.SetOIDCState(w, r, returnTo)
 	if err != nil {
-		log.Printf("Failed to generate state: %v", err)
+		s.logger(r.Context()).Error("failed to generate state", zap.Error(err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -82,7 +157,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// 3. Generate and store nonce
 	nonce, err := s.cookieManager.SetOIDCNonce(w, r)
 	if err != nil {
-		log.Printf("Failed to generate nonce: %v", err)
+		s.logger(r.Context()).Error("failed to generate nonce", zap.Error(err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -96,7 +171,9 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// 0. Check for OIDC errors
 	if oidcError := r.URL.Query().Get("error"); oidcError != "" {
 		description := r.URL.Query().Get("error_description")
-		log.Printf("OIDC login failed: %s - %s", oidcError, description)
+		s.logger(r.Context()).Error("OIDC login failed",
+			zap.String("error", oidcError),
+			zap.String("description", description))
 		http.Error(w, fmt.Sprintf("Login failed: %s", oidcError), http.StatusBadRequest)
 		return
 	}
@@ -104,7 +181,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// 1. Verify state
 	stateData, err := s.cookieManager.GetOIDCState(r)
 	if err != nil {
-		log.Printf("State verification failed: %v", err)
+		s.logger(r.Context()).Error("state verification failed", zap.Error(err))
 		http.Error(w, "Invalid state", http.StatusBadRequest)
 		return
 	}
@@ -124,7 +201,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	oauth2Token, err := s.oidcProvider.Exchange(r.Context(), code)
 	if err != nil {
-		log.Printf("Failed to exchange token: %v", err)
+		s.logger(r.Context()).Error("failed to exchange token", zap.Error(err))
 		http.Error(w, "Failed to exchange token", http.StatusInternalServerError)
 		return
 	}
@@ -145,7 +222,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// 4. Verify Nonce
 	nonce, err := s.cookieManager.GetOIDCNonce(r)
 	if err != nil {
-		log.Printf("Nonce verification failed: %v", err)
+		s.logger(r.Context()).Error("nonce verification failed", zap.Error(err))
 		http.Error(w, "Invalid nonce", http.StatusBadRequest)
 		return
 	}
@@ -180,7 +257,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.sessionStore.Set(r.Context(), sess); err != nil {
-		log.Printf("Failed to save session: %v", err)
+		s.logger(r.Context()).Error("failed to save session", zap.Error(err))
 		http.Error(w, "Failed to create session", http.StatusInternalServerError)
 		return
 	}
@@ -188,7 +265,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// 6. Set Session Cookie
 	encodedSession, err := s.cookieManager.Encode("session_id", sessionID)
 	if err != nil {
-		log.Printf("Failed to encode session cookie: %v", err)
+		s.logger(r.Context()).Error("failed to encode session cookie", zap.Error(err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -215,7 +292,9 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		// Attempt to decode to get session ID for deletion from store
 		if sessionID, err := s.cookieManager.Decode("session_id", cookie.Value); err == nil {
 			if err := s.sessionStore.Delete(r.Context(), sessionID); err != nil {
-				log.Printf("Failed to delete session %s: %v", sessionID, err)
+				s.logger(r.Context()).Error("failed to delete session",
+					zap.String("session_id", sessionID),
+					zap.Error(err))
 			}
 		}
 	}
@@ -245,7 +324,7 @@ func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	// Get all public keys (active + retired) from key manager
 	set, err := s.keyManager.GetAllJWKS()
 	if err != nil {
-		log.Printf("Failed to get JWKS: %v", err)
+		s.logger(r.Context()).Error("failed to get JWKS", zap.Error(err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -253,7 +332,7 @@ func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
 	// Marshal the JWK Set to JSON
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(set); err != nil {
-		log.Printf("Failed to encode JWKS: %v", err)
+		s.logger(r.Context()).Error("failed to encode JWKS", zap.Error(err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}

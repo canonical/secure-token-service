@@ -122,7 +122,7 @@ func TestExchangeSession_Success(t *testing.T) {
 	}
 
 	// Create server
-	server := NewServer(sessionStore, keyManager, cookieManager, "test-issuer", "test-audience", 3600)
+	server := NewServer(sessionStore, keyManager, cookieManager, "test-issuer", "test-audience", 3600, nil)
 
 	// Test exchange
 	req := &stsv1.ExchangeRequest{
@@ -148,7 +148,7 @@ func TestExchangeSession_Success(t *testing.T) {
 func TestExchangeSession_EmptyCookie(t *testing.T) {
 	ctx := context.Background()
 
-	server := NewServer(&MockSessionStore{}, &MockKeyManager{}, &MockCookieManager{}, "issuer", "audience", 3600)
+	server := NewServer(&MockSessionStore{}, &MockKeyManager{}, &MockCookieManager{}, "issuer", "audience", 3600, nil)
 
 	req := &stsv1.ExchangeRequest{
 		SessionCookie: "",
@@ -175,7 +175,7 @@ func TestExchangeSession_InvalidCookie(t *testing.T) {
 		},
 	}
 
-	server := NewServer(&MockSessionStore{}, &MockKeyManager{}, cookieManager, "issuer", "audience", 3600)
+	server := NewServer(&MockSessionStore{}, &MockKeyManager{}, cookieManager, "issuer", "audience", 3600, nil)
 
 	req := &stsv1.ExchangeRequest{
 		SessionCookie: "bad-cookie",
@@ -207,7 +207,7 @@ func TestExchangeSession_SessionNotFound(t *testing.T) {
 		},
 	}
 
-	server := NewServer(sessionStore, &MockKeyManager{}, cookieManager, "issuer", "audience", 3600)
+	server := NewServer(sessionStore, &MockKeyManager{}, cookieManager, "issuer", "audience", 3600, nil)
 
 	req := &stsv1.ExchangeRequest{
 		SessionCookie: "valid-cookie",
@@ -248,7 +248,7 @@ func TestExchangeSession_MintTokenFailure(t *testing.T) {
 		},
 	}
 
-	server := NewServer(sessionStore, keyManager, cookieManager, "issuer", "audience", 3600)
+	server := NewServer(sessionStore, keyManager, cookieManager, "issuer", "audience", 3600, nil)
 
 	req := &stsv1.ExchangeRequest{
 		SessionCookie: "valid-cookie",
@@ -277,7 +277,7 @@ func TestRevokeUserSessions_Success(t *testing.T) {
 		},
 	}
 
-	server := NewServer(sessionStore, &MockKeyManager{}, &MockCookieManager{}, "issuer", "audience", 3600)
+	server := NewServer(sessionStore, &MockKeyManager{}, &MockCookieManager{}, "issuer", "audience", 3600, nil)
 
 	req := &stsv1.RevokeUserRequest{
 		UserId: "user-456",
@@ -297,7 +297,7 @@ func TestRevokeUserSessions_Success(t *testing.T) {
 func TestRevokeUserSessions_EmptyUserId(t *testing.T) {
 	ctx := context.Background()
 
-	server := NewServer(&MockSessionStore{}, &MockKeyManager{}, &MockCookieManager{}, "issuer", "audience", 3600)
+	server := NewServer(&MockSessionStore{}, &MockKeyManager{}, &MockCookieManager{}, "issuer", "audience", 3600, nil)
 
 	req := &stsv1.RevokeUserRequest{
 		UserId: "",
@@ -323,7 +323,7 @@ func TestRevokeUserSessions_Failure(t *testing.T) {
 		},
 	}
 
-	server := NewServer(sessionStore, &MockKeyManager{}, &MockCookieManager{}, "issuer", "audience", 3600)
+	server := NewServer(sessionStore, &MockKeyManager{}, &MockCookieManager{}, "issuer", "audience", 3600, nil)
 
 	req := &stsv1.RevokeUserRequest{
 		UserId: "user-456",
@@ -345,7 +345,7 @@ func TestNewServer(t *testing.T) {
 	keyManager := &MockKeyManager{}
 	cookieManager := &MockCookieManager{}
 
-	server := NewServer(sessionStore, keyManager, cookieManager, "test-issuer", "test-audience", 7200)
+	server := NewServer(sessionStore, keyManager, cookieManager, "test-issuer", "test-audience", 7200, nil)
 
 	if server == nil {
 		t.Fatal("Expected server to be initialized")

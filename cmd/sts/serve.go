@@ -6,7 +6,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,9 +18,11 @@ import (
 	"github.com/canonical/secure-token-service/internal/db"
 	grpcserver "github.com/canonical/secure-token-service/internal/grpc"
 	httpserver "github.com/canonical/secure-token-service/internal/http"
+	"github.com/canonical/secure-token-service/internal/observability"
 	"github.com/canonical/secure-token-service/internal/session"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 )
 
@@ -41,7 +42,9 @@ func init() {
 
 // runServe executes the serve command logic
 func runServe(cmd *cobra.Command, args []string) error {
-	log.Println("Starting Session Service (Janus)...")
+	// Create a temporary logger for early startup messages
+	tempLogger, _ := observability.NewLogger("info", false)
+	tempLogger.Info("starting Session Service (Janus)")
 
 	ctx := context.Background()
 
@@ -50,7 +53,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %w", err)
 	}
-	log.Printf("Configuration loaded: HTTP=%s, gRPC=%s, Database=%s", cfg.HTTPPort, cfg.GRPCPort, cfg.DatabaseURL)
+	tempLogger.Info("configuration loaded",
+		zap.String("http_port", cfg.HTTPPort),
+		zap.String("grpc_port", cfg.GRPCPort),
+		zap.String("database", cfg.DatabaseURL))
 
 	// Initialize Database
 	database, err := db.NewDB(ctx, cfg.DatabaseURL)
@@ -58,21 +64,38 @@ func runServe(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer database.Close()
-	log.Println("Database connected")
+	tempLogger.Info("database connected")
 
 	// NOTE: Migrations are NOT run automatically on startup
 	// Run migrations manually with: ./bin/sts migrate
 
 	// Initialize JWKS Repository
 	jwksRepo := db.NewPostgresJWKSRepository(database.Pool())
-	log.Println("JWKS repository initialized")
+	tempLogger.Info("JWKS repository initialized")
+
+	// Initialize Observability
+	obs, err := observability.Initialize(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to initialize observability: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := obs.Shutdown(shutdownCtx); err != nil {
+			obs.Logger.Error("failed to shutdown observability", zap.Error(err))
+		}
+	}()
+	obs.Logger.Info("observability initialized",
+		zap.Bool("logging", true),
+		zap.Bool("metrics", cfg.MetricsEnabled),
+		zap.Bool("tracing", cfg.TracingEnabled))
 
 	// Initialize Key Manager
 	keyManager, err := auth.NewKeyManager(ctx, jwksRepo)
 	if err != nil {
 		return fmt.Errorf("failed to initialize key manager: %w", err)
 	}
-	log.Println("Key manager initialized")
+	obs.Logger.Info("key manager initialized")
 
 	// Initialize Session Store
 	sessionStore, err := session.NewValkeyStore(
@@ -84,14 +107,14 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to initialize session store: %w", err)
 	}
-	log.Println("Session store initialized")
+	obs.Logger.Info("session store initialized")
 
 	// Initialize Cookie Manager
 	cookieManager := cookie.NewCookieManager(
 		[]byte(cfg.CookieHashKey),
 		[]byte(cfg.CookieBlockKey),
 	)
-	log.Println("Cookie manager initialized")
+	obs.Logger.Info("cookie manager initialized")
 
 	// Initialize OIDC
 	provider, err := oidc.NewProvider(ctx, cfg.OIDCProviderURL)
@@ -106,22 +129,22 @@ func runServe(cmd *cobra.Command, args []string) error {
 		Endpoint:     provider.Endpoint(),
 		Scopes:       cfg.OIDCScopes,
 	}
-	log.Println("OIDC provider initialized")
+	obs.Logger.Info("OIDC provider initialized")
 
-	// Start HTTP server in goroutine
+	// Start HTTP server in goroutine with observability
 	oidcProvider := httpserver.NewOIDCProvider(provider, oauth2Config)
-	httpSrv := httpserver.NewServer(sessionStore, keyManager, cookieManager, oidcProvider)
+	httpSrvWithObs := httpserver.NewServer(sessionStore, keyManager, cookieManager, oidcProvider, obs)
 	go func() {
-		if err := httpSrv.Start(cfg.HTTPPort); err != nil && err != http.ErrServerClosed {
-			log.Printf("HTTP server failed: %v", err)
+		if err := httpSrvWithObs.StartWithMiddleware(cfg.HTTPPort); err != nil && err != http.ErrServerClosed {
+			obs.Logger.Error("HTTP server failed", zap.Error(err))
 		}
 	}()
 
-	// Start gRPC server in goroutine
-	grpcSrv := grpcserver.NewServer(sessionStore, keyManager, cookieManager, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTExpiry)
+	// Start gRPC server in goroutine with observability
+	grpcSrvWithObs := grpcserver.NewServer(sessionStore, keyManager, cookieManager, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTExpiry, obs)
 	go func() {
-		if err := grpcSrv.Start(cfg.GRPCPort); err != nil {
-			log.Printf("gRPC server failed: %v", err)
+		if err := grpcSrvWithObs.StartWithInterceptors(cfg.GRPCPort); err != nil {
+			obs.Logger.Error("gRPC server failed", zap.Error(err))
 		}
 	}()
 
@@ -129,19 +152,23 @@ func runServe(cmd *cobra.Command, args []string) error {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
-	log.Printf("Received signal: %v, shutting down...", sig)
+	obs.Logger.Info("received shutdown signal", zap.String("signal", sig.String()))
 
 	// Shutdown HTTP Server with timeout
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("HTTP server forced to shutdown: %v", err)
+	if httpSrvWithObs != nil {
+		if err := httpSrvWithObs.Shutdown(shutdownCtx); err != nil {
+			obs.Logger.Error("HTTP server forced to shutdown", zap.Error(err))
+		}
 	}
 
 	// Stop gRPC Server
-	grpcSrv.Stop()
+	if grpcSrvWithObs != nil {
+		grpcSrvWithObs.Stop()
+	}
 
-	log.Println("Server exiting")
+	obs.Logger.Info("server exiting")
 	return nil
 }
