@@ -40,7 +40,17 @@ type Config struct {
 	OIDCClientID     string   `envconfig:"OIDC_CLIENT_ID" required:"true"`
 	OIDCClientSecret string   `envconfig:"OIDC_CLIENT_SECRET" required:"true"`
 	OIDCRedirectURL  string   `envconfig:"OIDC_REDIRECT_URL" required:"true"`
-	OIDCScopes       []string `envconfig:"OIDC_SCOPES" default:"openid,profile,email"`
+	OIDCScopes       []string `envconfig:"OIDC_SCOPES" default:"openid,profile,email,offline_access"`
+
+	// Observability
+	LogLevel          string  `envconfig:"LOG_LEVEL" default:"info"`
+	LogFormat         string  `envconfig:"LOG_FORMAT" default:"json"`
+	MetricsEnabled    bool    `envconfig:"METRICS_ENABLED" default:"true"`
+	TracingEnabled    bool    `envconfig:"TRACING_ENABLED" default:"true"`
+	TracingEndpoint   string  `envconfig:"TRACING_ENDPOINT" default:""`
+	TracingSampleRate float64 `envconfig:"TRACING_SAMPLE_RATE" default:"0.1"`
+	ServiceName       string  `envconfig:"SERVICE_NAME" default:"secure-token-service"`
+	ServiceVersion    string  `envconfig:"SERVICE_VERSION" default:"1.0.0"`
 }
 
 // Load reads configuration from environment variables.
