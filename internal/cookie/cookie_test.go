@@ -7,12 +7,12 @@ import (
 	"testing"
 
 	"github.com/canonical/secure-token-service/internal/cookie"
-	"github.com/gorilla/securecookie"
+	"github.com/chmike/securecookie"
 )
 
 func TestCookieManager_EncodeDecode(t *testing.T) {
-	hashKey := securecookie.GenerateRandomKey(64)
-	blockKey := securecookie.GenerateRandomKey(32)
+	hashKey := securecookie.MustGenerateRandomKey()
+	blockKey := securecookie.MustGenerateRandomKey()
 
 	cm := cookie.NewCookieManager(hashKey, blockKey)
 
@@ -41,8 +41,8 @@ func TestCookieManager_EncodeDecode(t *testing.T) {
 }
 
 func TestCookieManager_DecodeInvalid(t *testing.T) {
-	hashKey := securecookie.GenerateRandomKey(64)
-	blockKey := securecookie.GenerateRandomKey(32)
+	hashKey := securecookie.MustGenerateRandomKey()
+	blockKey := securecookie.MustGenerateRandomKey()
 
 	cm := cookie.NewCookieManager(hashKey, blockKey)
 
@@ -54,12 +54,12 @@ func TestCookieManager_DecodeInvalid(t *testing.T) {
 }
 
 func TestCookieManager_WrongKey(t *testing.T) {
-	hashKey1 := securecookie.GenerateRandomKey(64)
-	blockKey1 := securecookie.GenerateRandomKey(32)
+	hashKey1 := securecookie.MustGenerateRandomKey()
+	blockKey1 := securecookie.MustGenerateRandomKey()
 	cm1 := cookie.NewCookieManager(hashKey1, blockKey1)
 
-	hashKey2 := securecookie.GenerateRandomKey(64)
-	blockKey2 := securecookie.GenerateRandomKey(32)
+	hashKey2 := securecookie.MustGenerateRandomKey()
+	blockKey2 := securecookie.MustGenerateRandomKey()
 	cm2 := cookie.NewCookieManager(hashKey2, blockKey2)
 
 	name := "session_id"
@@ -79,7 +79,7 @@ func TestCookieManager_WrongKey(t *testing.T) {
 }
 
 func TestCookieManager_NoEncryption(t *testing.T) {
-	hashKey := securecookie.GenerateRandomKey(64)
+	hashKey := securecookie.MustGenerateRandomKey()
 	// No block key (no encryption, only signing)
 	cm := cookie.NewCookieManager(hashKey, nil)
 
