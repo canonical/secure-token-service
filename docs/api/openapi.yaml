@@ -1,0 +1,295 @@
+openapi: 3.0.3
+info:
+  title: Secure Token Service (Janus) API  
+  description: |
+    Security Token Service implementing the Phantom Token Pattern for session management and JWT issuance.
+    
+    This service provides:
+    - OIDC authentication with opaque session cookies
+    - Session-to-JWT exchange for internal services (gRPC)
+    - JWKS endpoint for JWT verification
+  version: 1.0.0
+  contact:
+    name: Canonical Identity Team
+    url: https://github.com/canonical/secure-token-service
+
+servers:
+  - url: https://sts.example.com
+    description: Production
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: Authentication
+    description: OIDC authentication flow
+  - name: JWKS
+    description: JSON Web Key Set endpoint
+  - name: Health
+    description: Service health and metrics
+
+paths:
+  /auth/login:
+    get:
+      summary: Initiate OIDC login
+      description: |
+        Redirects to upstream OIDC provider for authentication.
+        Sets state and nonce cookies for CSRF protection.
+      tags:
+        - Authentication
+      parameters:
+        - name: return_to
+          in: query
+          description: URL to redirect to after successful login (default: "/")
+          required: false
+          schema:
+            type: string
+            example: "/dashboard"
+      responses:
+        '302':
+          description: Redirect to OIDC provider
+          headers:
+            Location:
+              schema:
+                type: string
+                example: "https://idp.example.com/authorize?client_id=...&redirect_uri=..."
+            Set-Cookie:
+              description: OIDC state and nonce cookies
+              schema:
+                type: string
+                example: "oauth_state=...; HttpOnly; Secure; SameSite=Lax"
+
+  /auth/callback:
+    get:
+      summary: OIDC callback endpoint
+      description: |
+        Handles OIDC provider callback after user authentication.
+        Exchanges authorization code for tokens, creates session, and sets session cookie.
+      tags:
+        - Authentication
+      parameters:
+        - name: code
+          in: query
+          required: true
+          description: Authorization code from OIDC provider
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          description: CSRF state parameter
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          description: Error from OIDC provider
+          schema:
+            type: string
+            enum: ["access_denied", "invalid_request", "unauthorized_client"]
+        - name: error_description
+          in: query
+          required: false
+          description: Human-readable error description
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Successful authentication, redirect to return_to URL
+          headers:
+            Location:
+              schema:
+                type: string
+                example: "/dashboard"
+            Set-Cookie:
+              description: Opaque session cookie
+              schema:
+                type: string
+                example: "session_id=uuid; HttpOnly; Secure; SameSite=Lax; Max-Age=3600"
+        '400':
+          description: Bad request (invalid state, missing code, OIDC error)
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Invalid state parameter"
+        '500':
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Failed to exchange authorization code"
+
+ /auth/logout:
+    post:
+      summary: Logout and destroy session  
+      description: |
+        Terminates the user session and clears the session cookie.
+        Session is deleted from Valkey storage.
+      tags:
+        - Authentication
+      parameters:
+        - name: Cookie
+          in: header
+          required: true
+          description: Session cookie
+          schema:
+            type: string
+            example: "session_id=uuid"
+      responses:
+        '200':
+          description: Successfully logged out
+          headers:
+            Set-Cookie:
+              description: Cleared session cookie
+              schema:
+                type: string
+                example: "session_id=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Logged out successfully"
+        '500':
+          description: Failed to delete session
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /.well-known/jwks.json:
+    get:
+      summary: Get JSON Web Key Set
+      description: |
+        Returns public keys for verifying JWTs issued by this service.
+        Includes both active and retired keys (for rotation grace period).
+        
+        **Caching**: 
+        - Server-side: Valkey cache (TTL: 10 minutes, configurable)
+        - Client-side: Cache-Control header (max-age=300)
+      tags:
+        - JWKS
+      responses:
+        '200':
+          description: JWKS response
+          headers:
+            Cache-Control:
+              description: HTTP caching directive
+              schema:
+                type: string
+                example: "public, max-age=300"
+            Content-Type:
+              schema:
+                type: string
+                example: "application/json"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/JWK'
+              example:
+                keys:
+                  - kty: "RSA"
+                    use: "sig"
+                    alg: "RS256"
+                    kid: "janus-key-abc123"
+                    n: "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps..."
+                    e: "AQAB"
+        '500':
+          description: Failed to retrieve JWKS
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Failed to retrieve JWKS"
+
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Returns service health status
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  version:
+                    type: string
+                    example: "1.0.0"
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      description: Exposes Prometheus metrics for monitoring
+      tags:
+        - Health
+      responses:
+        '200':
+          description: Prometheus metrics in text format
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP http_requests_total Total HTTP requests
+                  # TYPE http_requests_total counter
+                  http_requests_total{method="GET",path="/health",status="200"} 42
+
+components:
+  schemas:
+    JWK:
+      type: object
+      description: JSON Web Key (public key for JWT verification)
+      required:
+        - kty
+        - use
+        - alg
+        - kid
+        - n
+        - e
+      properties:
+        kty:
+          type: string
+          description: Key type
+          example: "RSA"
+        use:
+          type: string
+          description: Key usage
+          example: "sig"
+        alg:
+          type: string
+          description: Algorithm
+          example: "RS256"
+        kid:
+          type: string
+          description: Key ID
+          example: "janus-key-abc123"
+        n:
+          type: string
+          description: RSA modulus (Base64url encoded)
+          example: "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM..."
+        e:
+          type: string
+          description: RSA exponent (Base64url encoded)
+          example: "AQAB"
+
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: session_id
+      description: Opaque session cookie (HttpOnly, Secure, SameSite=Lax)
