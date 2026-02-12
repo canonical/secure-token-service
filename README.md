@@ -1138,14 +1138,344 @@ Returns the JSON Web Key Set containing all public keys (active + retired) for J
 
 ## License
 
-Copyright 2025 Canonical Ltd.  
-Licensed under AGPL-3.0
+## References
+
+- [OIDC Specification](https://openid.net/specs/openid-connect-core-1_0.html)
+- [JWT RFC 7519](https://datatracker.ietf.org/doc/html/rfc7519)
+- [JWKS RFC 7517](https://datatracker.ietf.org/doc/html/rfc7517)
+- [Phantom Token Pattern](https://curity.io/resources/learn/phantom-token-pattern/)
+- [OAuth 2.0 Token Exchange](https://datatracker.ietf.org/doc/html/rfc8693)
 
 ---
 
-## Related Documentation
+## Testing
 
-- [Specification (ID052)](https://docs.google.com/document/d/1jIt1WbS6CLxpFIW0hWhQUhX7xN2qr43_xOALT5zHoKs/edit?usp=sharing)
-- [JWKS PostgreSQL Migration Walkthrough](./docs/jwks-migration.md)
-- [Phantom Token Pattern](https://curity.io/resources/learn/phantom-token-pattern/)
-- [OAuth 2.0 Token Exchange](https://datatracker.ietf.org/doc/html/rfc8693)
+### Running Tests
+
+```bash
+# Run all tests with parallelization (max 10 concurrent tests)
+make test
+
+# Run tests without long-running tests (e.g., TTL expiry tests)
+make test-short
+
+# Run only integration tests (requires Docker/Podman)
+make test-integration
+
+# Run tests with coverage report
+make test
+# Coverage report generated at ./coverage.html
+```
+
+### Test Parallelization
+
+Tests are configured to run in parallel with a maximum of **10 concurrent tests**:
+- `-p 10`: Maximum 10 test packages run simultaneously
+- `-parallel 10`: Maximum 10 tests per package run simultaneously
+
+This limit prevents resource exhaustion from too many concurrent Docker containers during integration testing.
+
+**Why 10?** This balances:
+- **Performance**: Faster test execution through parallelization
+- **Resource Usage**: Prevents overwhelming Docker with container creation
+- **Reliability**: Reduces flaky tests from resource contention
+
+### Test Containers
+
+Integration tests use `testcontainers-go` for PostgreSQL and Valkey:
+- **Container Names**: Based on test names for predictability (e.g., `sts-auth-pg-testnewkeymanager`)
+- **Automatic Cleanup**: Containers are automatically removed after test completion via `defer terminate()`
+- **Isolation**: Each test gets its own container instance
+
+**Packages with Container Tests**:
+- `internal/auth`: PostgreSQL + Valkey for key management and caching
+- `internal/session`: Valkey for session storage
+- `internal/db`: PostgreSQL for JWKS repository
+
+### Running Tests Locally
+
+**Prerequisites**:
+- Docker or Podman running and accessible
+- Go 1.23+
+
+**For Podman users**, set the `DOCKER_HOST` environment variable:
+
+```bash
+# Set DOCKER_HOST for Podman
+export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/podman/podman.sock
+
+# Verify Podman is accessible
+podman ps
+
+# Run tests with Podman
+make test
+
+# Or pass directly to make
+make test DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/podman/podman.sock
+```
+
+**Running tests**:
+
+```bash
+# Install dependencies and generate mocks
+make mocks
+
+# Run all tests
+make test
+
+# Run specific package tests
+go test -v ./internal/auth/...
+go test -v ./internal/session/...
+go test -v ./internal/db/...
+```
+
+### Test Organization
+
+| Package | Type | Dependencies | Description |
+|---------|------|--------------|-------------|
+| `internal/http` | Unit | Mocks | HTTP endpoint handlers |
+| `internal/grpc` | Unit | Mocks | gRPC service methods |
+| `internal/auth` | Integration | PostgreSQL, Valkey | Key management, JWT signing, caching |
+| `internal/session` | Integration | Valkey | Session storage operations |
+| `internal/db` | Integration | PostgreSQL | JWKS repository CRUD |
+| `internal/cookie` | Unit | None | Cookie encoding/decoding |
+
+### Writing New Tests
+
+When adding new tests that use containers:
+
+1. **Use `t.Parallel()`** to enable parallel execution:
+   ```go
+   func TestYourFeature(t *testing.T) {
+       t.Parallel()  // Add this as first line
+       // ... test code
+   }
+   ```
+
+2. **Container names are automatic**: The test helper functions automatically generate unique container names based on `t.Name()`
+
+3. **Always use `defer`** for cleanup:
+   ```go
+   repo, container := setupTestPostgres(t)
+   defer func() {
+       if err := container.Terminate(context.Background()); err != nil {
+           t.Logf("Failed to terminate container: %v", err)
+       }
+   }()
+   ```
+
+### Troubleshooting Tests
+
+**Docker connection issues**:
+```bash
+# Check Docker is running
+docker ps
+
+# For Podman users, set DOCKER_HOST environment variable
+export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/podman/podman.sock
+
+# Verify Podman socket
+podman info
+
+# Alternative: use systemd user socket
+export DOCKER_HOST=unix:///run/user/$(id -u)/podman/podman.sock
+```
+
+**Test containers not cleaning up**:
+```bash
+# List running test containers
+docker ps -a | grep sts-
+
+# Manual cleanup if needed
+docker rm -f $(docker ps -a -q --filter "name=sts-")
+```
+
+**Parallel test failures**:
+```bash
+# Run tests sequentially to diagnose
+go test -v -p 1 -parallel 1 ./...
+```
+
+### Running Tests
+
+The project includes comprehensive integration tests that use testcontainers to spin up real PostgreSQL and Valkey instances.
+
+#### Prerequisites
+
+- **Docker or Podman**: Tests require a container runtime
+- **Go 1.25+**: Latest Go version
+- Sufficient resources (2GB+ RAM recommended)
+
+#### Podman Configuration
+
+If using Podman instead of Docker, set the `DOCKER_HOST` environment variable:
+
+```bash
+export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/podman/podman.sock
+
+# Verify Podman is accessible
+podman ps
+```
+
+**Note**: testcontainers will automatically detect and use Podman when `DOCKER_HOST` is set.
+
+#### Running Tests
+
+```bash
+# For Podman users - set this first
+export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/podman/podman.sock
+
+# Run all tests
+go test ./... -v
+
+# Run auth package tests (KeyManager, JWKS caching)
+go test ./internal/auth -v
+
+# Run specific test
+go test ./internal/auth -v -run TestKeyManager_MintToken
+
+# Run without TTL expiry test (saves time)
+go test ./internal/auth -v -short
+
+# Run with coverage
+go test ./... -cover -coverprofile=coverage.out
+go tool cover -html=coverage.out
+```
+
+### Test Coverage
+
+#### KeyManager Tests (`internal/auth/token_test.go`)
+- ✅ KeyManager initialization
+- ✅ KeyManager with caching enabled/disabled
+- ✅ Token minting with custom claims
+- ✅ JWT verification
+- ✅ Public key retrieval
+- ✅ JWK retrieval with metadata
+- ✅ GetAllJWKS for multiple keys
+
+#### JWKS Caching Tests (`internal/auth/token_cache_test.go`)
+- ✅ Cache MISS scenario (cold cache)
+- ✅ Cache HIT scenario (warm cache)
+- ✅ Cache invalidation
+- ✅ Cache TTL expiry
+- ✅ Caching disabled (nil client)
+- ✅ Graceful fallback on cache unavailability
+
+### CI/CD Integration
+
+#### With Docker
+```yaml
+# GitHub Actions example
+- name: Setup Docker
+  uses: docker/setup-dockerd@v1
+
+- name: Run tests
+  run: go test ./... -v
+```
+
+#### With Podman
+```yaml
+# GitHub Actions with Podman
+- name: Setup Podman
+  run: |
+    sudo apt-get update
+    sudo apt-get install -y podman
+
+- name: Run tests
+  env:
+    DOCKER_HOST: unix:///run/podman/podman.sock
+  run: go test ./... -v
+```
+
+#### Skip Integration Tests
+```yaml
+- name: Run unit tests only
+  run: go test ./... -v -short
+```
+
+### Troubleshooting
+
+**Error: "checked path: $XDG_RUNTIME_DIR"**
+- Container runtime (Docker/Podman) is not running or not accessible
+- **Docker**: `sudo systemctl start docker` or start Docker Desktop
+- **Podman**: Set `DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/podman/podman.sock`
+
+**Error: "Failed to start PostgreSQL container"**
+- Container daemon not running
+- Insufficient resources
+- Solution: Check runtime status and allocate more resources
+
+**Tests timing out**
+- Container pulling images for first time
+- Solution: Pull images manually:
+  ```bash
+  # Docker
+  docker pull postgres:16-alpine
+  docker pull valkey/valkey:7.2-alpine
+  
+  # Podman
+  podman pull postgres:16-alpine
+  podman pull valkey/valkey:7.2-alpine
+  ```
+
+---
+
+## Error Handling
+
+The service uses standardized error responses with machine-readable error codes.
+
+### Error Format
+
+**JSON:**
+```json
+{
+  "code": "SESSION_NOT_FOUND",
+  "message": "Session not found"
+}
+```
+
+**Common Error Codes:**
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `INVALID_STATE` | 400 | Invalid OIDC state parameter |
+| `SESSION_NOT_FOUND` | 401 | Session doesn't exist or expired |
+| `JWT_MINTING_FAILED` | 500 | Failed to mint JWT |
+| `JWKS_RETRIEVAL_FAILED` | 500 | Failed to retrieve JWKS |
+
+**See also:** `internal/errors/errors.go` for full error package implementation.
+
+---
+
+## Mock Generation
+
+Mocks are generated via annotations, not committed to the repository.
+
+### Setup
+```bash
+# Install mockgen
+go install go.uber.org/mock/mockgen@latest
+
+# Generate all mocks
+go generate ./...
+```
+
+### Adding Mocks to Interfaces
+```go
+//go:generate mockgen -destination=mocks/mock_interfaces.go -package=mocks github.com/canonical/secure-token-service/internal/PACKAGE InterfaceName
+
+type InterfaceName interface {
+    Method(ctx context.Context) error
+}
+```
+
+Generated mocks are placed in `mocks/` subdirectories (gitignored).
+
+---
+
+## License
+
+AGPL-3.0 - See LICENSE file for details.
+
+## Contributing
+
+Contributions are welcome! Please see CONTRIBUTING.md for guidelines.

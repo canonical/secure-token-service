@@ -42,6 +42,9 @@ type Config struct {
 	OIDCRedirectURL  string   `envconfig:"OIDC_REDIRECT_URL" required:"true"`
 	OIDCScopes       []string `envconfig:"OIDC_SCOPES" default:"openid,profile,email,offline_access"`
 
+	// JWKS Caching
+	JWKSCacheTTL int `envconfig:"JWKS_CACHE_TTL" default:"600"` // seconds (10 minutes)
+
 	// Observability
 	LogLevel          string  `envconfig:"LOG_LEVEL" default:"info"`
 	LogFormat         string  `envconfig:"LOG_FORMAT" default:"json"`

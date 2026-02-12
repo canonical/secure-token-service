@@ -14,8 +14,10 @@ import (
 	"log"
 	"time"
 
+	"github.com/canonical/secure-token-service/internal/auth"
 	"github.com/canonical/secure-token-service/internal/config"
 	"github.com/canonical/secure-token-service/internal/db"
+	"github.com/canonical/secure-token-service/internal/session"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
@@ -145,6 +147,25 @@ func runRotateKey(cmd *cobra.Command, args []string) error {
 	}
 
 	log.Println("✓ Rotation verified: new key is active")
+
+	// Invalidate JWKS cache after rotation
+	// Initialize Valkey client for cache invalidation
+	valkeyClient, err := session.NewValkeyClient(cfg.CacheAddr, cfg.CachePassword, cfg.CacheDB)
+	if err != nil {
+		log.Printf("Warning: Failed to connect to cache for invalidation: %v", err)
+		log.Println("  Cached JWKS may be stale until TTL expires")
+	} else {
+		// Invalidate cache
+		cacheTTL := time.Duration(cfg.JWKSCacheTTL) * time.Second
+		// Create temporary KeyManager just for cache invalidation
+		tempKeyManager, _ := auth.NewKeyManager(ctx, jwksRepo, valkeyClient, cacheTTL)
+		if err := tempKeyManager.InvalidateJWKSCache(ctx); err != nil {
+			log.Printf("Warning: Failed to invalidate JWKS cache: %v", err)
+			log.Println("  Cached JWKS may be stale until TTL expires")
+		} else {
+			log.Println("✓ JWKS cache invalidated successfully")
+		}
+	}
 
 	return nil
 }

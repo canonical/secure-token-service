@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 
+	"github.com/canonical/secure-token-service/internal/constants"
 	"github.com/chmike/securecookie"
 )
 
@@ -54,14 +55,14 @@ func NewCookieManager(hashKey, blockKey []byte) *CookieManager {
 	// Create cookie objects for each cookie type
 	oauthStateCk := securecookie.MustNew("oauth_state", key, securecookie.Params{
 		Path:     "/",
-		MaxAge:   600, // 10 minutes
+		MaxAge:   constants.CookieMaxAge,
 		HTTPOnly: true,
 		Secure:   false, // Will be set dynamically based on request
 	})
 
 	oauthNonceCk := securecookie.MustNew("oauth_nonce", key, securecookie.Params{
 		Path:     "/",
-		MaxAge:   600, // 10 minutes
+		MaxAge:   constants.CookieMaxAge,
 		HTTPOnly: true,
 		Secure:   false, // Will be set dynamically based on request
 	})

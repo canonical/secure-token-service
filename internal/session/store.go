@@ -25,6 +25,9 @@ type Session struct {
 }
 
 // Store defines the interface for session storage.
+// TODO: Add session timeout enforcement with sliding window and periodic refresh
+// to prevent long-lived sessions from becoming a security risk. Currently sessions
+// rely solely on cookie expiry which may not be sufficient for high-security environments.
 type Store interface {
 	Get(ctx context.Context, sessionID string) (*Session, error)
 	Set(ctx context.Context, session *Session) error
@@ -164,4 +167,24 @@ func (s *ValkeyStore) RevokeUserSessions(ctx context.Context, userID string) err
 func (s *ValkeyStore) Close() error {
 	s.valkeyClient.Close()
 	return nil
+}
+
+// NewValkeyClient creates a new Valkey client for caching purposes.
+func NewValkeyClient(addr, password string, db int) (valkey.Client, error) {
+	opt := valkey.ClientOption{
+		InitAddress: []string{addr},
+	}
+	if password != "" {
+		opt.Password = password
+	}
+	if db != 0 {
+		opt.SelectDB = db
+	}
+
+	valkeyClient, err := valkey.NewClient(opt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create valkey client: %w", err)
+	}
+
+	return valkeyClient, nil
 }

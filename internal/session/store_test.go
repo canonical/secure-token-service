@@ -5,19 +5,38 @@ package session
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/valkey"
 	valkeygo "github.com/valkey-io/valkey-go"
 	"github.com/valkey-io/valkey-go/valkeycompat"
 )
 
+// sanitizeName converts test names to valid container names
+// Container names must match: [a-zA-Z0-9][a-zA-Z0-9_.-]*
+func sanitizeName(name string) string {
+	name = strings.ReplaceAll(name, "/", "-")
+	name = strings.ReplaceAll(name, " ", "-")
+	name = strings.ToLower(name)
+	return name
+}
+
 func setupTestValkey(t *testing.T) (*ValkeyStore, *valkey.ValkeyContainer) {
 	ctx := context.Background()
 
-	// Start Valkey container
-	valkeyContainer, err := valkey.Run(ctx, "valkey/valkey:7.2-alpine")
+	// Start Valkey container with unique name based on test name
+	containerName := fmt.Sprintf("sts-session-%s", sanitizeName(t.Name()))
+	valkeyContainer, err := valkey.Run(ctx, "valkey/valkey:7.2-alpine",
+		testcontainers.CustomizeRequest(testcontainers.GenericContainerRequest{
+			ContainerRequest: testcontainers.ContainerRequest{
+				Name: containerName,
+			},
+		}),
+	)
 	if err != nil {
 		t.Fatalf("Failed to start Valkey container: %v", err)
 	}
@@ -54,6 +73,7 @@ func setupTestValkey(t *testing.T) (*ValkeyStore, *valkey.ValkeyContainer) {
 }
 
 func TestValkeyStore_SetAndGet(t *testing.T) {
+	t.Parallel()
 	store, container := setupTestValkey(t)
 	defer func() {
 		if err := container.Terminate(context.Background()); err != nil {
@@ -99,6 +119,7 @@ func TestValkeyStore_SetAndGet(t *testing.T) {
 }
 
 func TestValkeyStore_GetNonExistent(t *testing.T) {
+	t.Parallel()
 	store, container := setupTestValkey(t)
 	defer func() {
 		if err := container.Terminate(context.Background()); err != nil {
@@ -115,6 +136,7 @@ func TestValkeyStore_GetNonExistent(t *testing.T) {
 }
 
 func TestValkeyStore_Delete(t *testing.T) {
+	t.Parallel()
 	store, container := setupTestValkey(t)
 	defer func() {
 		if err := container.Terminate(context.Background()); err != nil {
@@ -154,6 +176,7 @@ func TestValkeyStore_Delete(t *testing.T) {
 }
 
 func TestValkeyStore_RevokeUserSessions(t *testing.T) {
+	t.Parallel()
 	store, container := setupTestValkey(t)
 	defer func() {
 		if err := container.Terminate(context.Background()); err != nil {
@@ -217,6 +240,7 @@ func TestValkeyStore_RevokeUserSessions(t *testing.T) {
 }
 
 func TestValkeyStore_UserSessionTracking(t *testing.T) {
+	t.Parallel()
 	store, container := setupTestValkey(t)
 	defer func() {
 		if err := container.Terminate(context.Background()); err != nil {

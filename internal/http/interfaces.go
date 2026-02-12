@@ -12,38 +12,57 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// KeyManager defines the interface for key operations.
-type KeyManager interface {
-	MintToken(subject, issuer, audience string, expirySeconds int, claims map[string]interface{}) (string, error)
-	GetJWK() (jwk.Key, error)
-	GetAllJWKS() (jwk.Set, error)
-}
-
-// AuthCookieManager defines the interface for cookie operations.
-type AuthCookieManager interface {
-	Encode(name, value string) (string, error)
-	Decode(name, value string) (string, error)
-
+// CookieManager defines the interface for secure cookie operations
+type CookieManager interface {
 	SetOIDCState(w http.ResponseWriter, r *http.Request, returnTo string) (string, error)
 	GetOIDCState(r *http.Request) (map[string]string, error)
 	ClearOIDCState(w http.ResponseWriter, r *http.Request)
-
 	SetOIDCNonce(w http.ResponseWriter, r *http.Request) (string, error)
 	GetOIDCNonce(r *http.Request) (string, error)
 	ClearOIDCNonce(w http.ResponseWriter, r *http.Request)
 }
 
-// IDToken defines the interface for ID Token properties.
-type IDToken interface {
-	GetNonce() string
-	GetSubject() string
-	GetExpiry() time.Time
-	GetOriginalToken() string // For IDTokenRaw
+// KeyManager defines the interface for JWT key management
+type KeyManager interface {
+	MintToken(subject, issuer, audience string, expirySeconds int, claims map[string]interface{}) (string, error)
+	GetAllJWKS() (jwk.Set, error)
 }
 
-// OIDCProvider defines the interface for OIDC operations.
+// AuthCookieManager defines the interface for authentication cookie operations
+type AuthCookieManager interface {
+	SetOIDCState(w http.ResponseWriter, r *http.Request, returnTo string) (string, error)
+	GetOIDCState(r *http.Request) (map[string]string, error)
+	ClearOIDCState(w http.ResponseWriter, r *http.Request)
+	SetOIDCNonce(w http.ResponseWriter, r *http.Request) (string, error)
+	GetOIDCNonce(r *http.Request) (string, error)
+	ClearOIDCNonce(w http.ResponseWriter, r *http.Request)
+	// Additional methods for session cookies
+	Encode(name, value string) (string, error)
+	Decode(name, value string) (string, error)
+}
+
+// IDToken defines the interface for ID token operations
+type IDToken interface {
+	Claims(v interface{}) error
+	Subject() string
+	// Additional methods for OIDC flow
+	GetNonce() (string, error)
+	GetSubject() (string, error)
+	GetOriginalToken() string
+}
+
+// OAuth2Token defines the interface for OAuth2 token operations
+type OAuth2Token interface {
+	Extra(key string) interface{}
+	AccessToken() string
+	RefreshToken() string
+	Expiry() time.Time
+}
+
+// OIDCProvider defines the interface for OIDC provider operations
 type OIDCProvider interface {
 	AuthCodeURL(state string, opts ...oauth2.AuthCodeOption) string
-	Exchange(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (*oauth2.Token, error)
+	Exchange(ctx context.Context, code string, opts ...oauth2.AuthCodeOption) (OAuth2Token, error)
+	Verifier() interface{}
 	VerifyIDToken(ctx context.Context, rawIDToken string) (IDToken, error)
 }
