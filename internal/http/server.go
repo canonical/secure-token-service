@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/canonical/secure-token-service/internal/constants"
 	"github.com/canonical/secure-token-service/internal/observability"
 	"github.com/canonical/secure-token-service/internal/session"
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -64,8 +65,9 @@ func NewServer(store session.Store, km KeyManager, cm AuthCookieManager, provide
 	}
 }
 
-// Start starts the HTTP server.
-func (s *Server) Start(port string) error {
+// Router creates and returns a chi router with all routes configured.
+// This is useful for testing endpoints.
+func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 
 	// OIDC endpoints
@@ -76,6 +78,13 @@ func (s *Server) Start(port string) error {
 
 	// JWKS endpoint
 	r.Get("/.well-known/jwks.json", s.handleJWKS)
+
+	return r
+}
+
+// Start starts the HTTP server.
+func (s *Server) Start(port string) error {
+	r := s.Router()
 
 	s.logger(context.Background()).Info("HTTP server starting", zap.String("port", port))
 	s.server = &http.Server{
@@ -228,7 +237,8 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	s.cookieManager.ClearOIDCNonce(w, r)
 
-	if idToken.GetNonce() != nonce {
+	idTokenNonce, err := idToken.GetNonce()
+	if err != nil || idTokenNonce != nonce {
 		http.Error(w, "Nonce mismatch", http.StatusBadRequest)
 		return
 	}
@@ -236,8 +246,8 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// 5. Create Session
 	sessionID := uuid.New().String()
 	// Ideally extract sub from idToken for userID
-	userID := idToken.GetSubject()
-	if userID == "" {
+	userID, err := idToken.GetSubject()
+	if err != nil || userID == "" {
 		userID = "user-" + sessionID
 	}
 
@@ -245,15 +255,11 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	sess := &session.Session{
 		SessionID:    sessionID,
 		UserID:       userID,
-		AccessToken:  oauth2Token.AccessToken,
+		AccessToken:  oauth2Token.AccessToken(),
 		IDToken:      idToken.GetOriginalToken(),
-		RefreshToken: oauth2Token.RefreshToken,
-		ExpiresAt:    oauth2Token.Expiry,
+		RefreshToken: oauth2Token.RefreshToken(),
+		ExpiresAt:    oauth2Token.Expiry(),
 		CreatedAt:    now,
-	}
-
-	if sess.ExpiresAt.IsZero() {
-		sess.ExpiresAt = now.Add(1 * time.Hour)
 	}
 
 	if err := s.sessionStore.Set(r.Context(), sess); err != nil {
@@ -276,7 +282,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		Expires:  sess.ExpiresAt,
 		HttpOnly: true,
-		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+		Secure:   true,
 	})
 
 	// 7. Redirect to return_to
@@ -306,6 +312,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
+		Secure:   true,
 	})
 
 	w.WriteHeader(http.StatusOK)
@@ -321,7 +328,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 
 // handleJWKS exposes the public key for JWT verification.
 func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
-	// Get all public keys (active + retired) from key manager
+	// Get all public keys (active + retired) from key manager with caching
 	set, err := s.keyManager.GetAllJWKS()
 	if err != nil {
 		s.logger(r.Context()).Error("failed to get JWKS", zap.Error(err))
@@ -329,8 +336,11 @@ func (s *Server) handleJWKS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Marshal the JWK Set to JSON
+	// Set HTTP cache headers (browser/CDN caching)
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", constants.HTTPCacheMaxAge))
 	w.Header().Set("Content-Type", "application/json")
+
+	// Marshal the JWK Set to JSON
 	if err := json.NewEncoder(w).Encode(set); err != nil {
 		s.logger(r.Context()).Error("failed to encode JWKS", zap.Error(err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)

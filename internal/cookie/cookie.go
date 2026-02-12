@@ -4,34 +4,29 @@
 package cookie
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 
+	"github.com/canonical/secure-token-service/internal/constants"
 	"github.com/chmike/securecookie"
 )
 
 // CookieManager handles secure cookie encoding and decoding.
 type CookieManager struct {
 	key          []byte
-	aesCipher    cipher.Block
+	sessionCk    *securecookie.Obj // Main session cookie
 	oauthStateCk *securecookie.Obj
 	oauthNonceCk *securecookie.Obj
 }
 
 // NewCookieManager creates a new CookieManager with the given keys.
 // hashKey is required, used to authenticate the cookie value using HMAC.
-// blockKey is optional, used to encrypt the cookie value. Set to nil or empty slice to disable encryption.
 // Note: chmike/securecookie uses a single key (combines both hash and encryption).
-func NewCookieManager(hashKey, blockKey []byte) *CookieManager {
+func NewCookieManager(hashKey []byte) *CookieManager {
 	// chmike/securecookie requires a 32-byte key for AES-128 + HMAC-SHA256
 	// We'll use the hashKey as the primary key
 	key := hashKey
@@ -45,112 +40,91 @@ func NewCookieManager(hashKey, blockKey []byte) *CookieManager {
 		key = key[:32]
 	}
 
-	// Create AES cipher for fast encoding/decoding
-	aesCipher, err := aes.NewCipher(key[:16])
-	if err != nil {
-		panic(fmt.Sprintf("failed to create AES cipher: %v", err))
-	}
-
 	// Create cookie objects for each cookie type
+	sessionCk := securecookie.MustNew("session_id", key, securecookie.Params{
+		Path:     "/",
+		MaxAge:   constants.CookieMaxAge,
+		HTTPOnly: true,
+		Secure:   false, // Will be set dynamically based on request
+	})
 	oauthStateCk := securecookie.MustNew("oauth_state", key, securecookie.Params{
 		Path:     "/",
-		MaxAge:   600, // 10 minutes
+		MaxAge:   constants.CookieMaxAge,
 		HTTPOnly: true,
 		Secure:   false, // Will be set dynamically based on request
 	})
 
 	oauthNonceCk := securecookie.MustNew("oauth_nonce", key, securecookie.Params{
 		Path:     "/",
-		MaxAge:   600, // 10 minutes
+		MaxAge:   constants.CookieMaxAge,
 		HTTPOnly: true,
 		Secure:   false, // Will be set dynamically based on request
 	})
 
 	return &CookieManager{
 		key:          key,
-		aesCipher:    aesCipher,
+		sessionCk:    sessionCk,
 		oauthStateCk: oauthStateCk,
 		oauthNonceCk: oauthNonceCk,
 	}
 }
 
-// Encode encodes a cookie name and value using a fast, optimized approach.
-// This implementation uses direct encryption + HMAC without HTTP overhead.
-func (m *CookieManager) Encode(name, value string) (string, error) {
-	valueBytes := []byte(value)
-
-	// Create IV
-	iv := make([]byte, 16)
-	if _, err := rand.Read(iv); err != nil {
-		return "", fmt.Errorf("failed to generate IV: %w", err)
+// Encode encodes a cookie name and value using securecookie.
+func (m *CookieManager) Encode(name string, value string) (string, error) {
+	// Create a temporary securecookie object for this specific name
+	// We use the same params as the main session cookie
+	obj, err := securecookie.New(name, m.key, securecookie.Params{
+		Path:     "/",
+		MaxAge:   constants.CookieMaxAge,
+		HTTPOnly: true,
+		Secure:   false,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create cookie object: %w", err)
 	}
 
-	// Encrypt value
-	encrypted := make([]byte, len(valueBytes))
-	stream := cipher.NewCTR(m.aesCipher, iv)
-	stream.XORKeyStream(encrypted, valueBytes)
+	recorder := httptest.NewRecorder()
+	if err := obj.SetValue(recorder, []byte(value)); err != nil {
+		return "", err
+	}
 
-	// Combine: IV || encrypted data
-	combined := make([]byte, 0, len(iv)+len(encrypted))
-	combined = append(combined, iv...)
-	combined = append(combined, encrypted...)
+	cookies := recorder.Result().Cookies()
+	if len(cookies) == 0 {
+		return "", fmt.Errorf("no cookie generated")
+	}
 
-	// Create HMAC
-	h := hmac.New(sha256.New, m.key)
-	h.Write([]byte(name))
-	h.Write(combined)
-	mac := h.Sum(nil)
-
-	// Combine: IV || encrypted || MAC
-	final := make([]byte, 0, len(combined)+len(mac))
-	final = append(final, combined...)
-	final = append(final, mac...)
-
-	// Base64 encode
-	return base64.RawURLEncoding.EncodeToString(final), nil
+	return cookies[0].Value, nil
 }
 
 // Decode decodes a cookie name and value using a fast, optimized approach.
+// Decode decodes a cookie name and value using securecookie.
 func (m *CookieManager) Decode(name, value string) (string, error) {
-	// Base64 decode
-	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	// Create a temporary securecookie object for this specific name
+	obj, err := securecookie.New(name, m.key, securecookie.Params{
+		Path:     "/",
+		MaxAge:   constants.CookieMaxAge,
+		HTTPOnly: true,
+		Secure:   false,
+	})
 	if err != nil {
-		return "", fmt.Errorf("failed to decode base64: %w", err)
+		return "", fmt.Errorf("failed to create cookie object: %w", err)
 	}
 
-	// Minimum length check: IV (16) + MAC (32)
-	if len(decoded) < 48 {
-		return "", errors.New("invalid cookie: too short")
+	req, err := http.NewRequest("GET", "/", nil)
+	if err != nil {
+		return "", err
+	}
+	req.AddCookie(&http.Cookie{
+		Name:  name,
+		Value: value,
+	})
+
+	val, err := obj.GetValue(nil, req)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode cookie: %w", err)
 	}
 
-	// Split: IV || encrypted || MAC
-	macStart := len(decoded) - 32
-	combined := decoded[:macStart]
-	mac := decoded[macStart:]
-
-	// Verify HMAC
-	h := hmac.New(sha256.New, m.key)
-	h.Write([]byte(name))
-	h.Write(combined)
-	expectedMAC := h.Sum(nil)
-
-	if !hmac.Equal(mac, expectedMAC) {
-		return "", errors.New("invalid cookie: MAC mismatch")
-	}
-
-	// Split: IV || encrypted
-	if len(combined) < 16 {
-		return "", errors.New("invalid cookie: missing IV")
-	}
-	iv := combined[:16]
-	encrypted := combined[16:]
-
-	// Decrypt
-	decrypted := make([]byte, len(encrypted))
-	stream := cipher.NewCTR(m.aesCipher, iv)
-	stream.XORKeyStream(decrypted, encrypted)
-
-	return string(decrypted), nil
+	return string(val), nil
 }
 
 // OIDC State Methods

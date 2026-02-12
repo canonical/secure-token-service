@@ -10,7 +10,6 @@ import (
 
 	stsv1 "github.com/canonical/secure-token-service/api/proto/v1"
 	"github.com/canonical/secure-token-service/internal/observability"
-	"github.com/canonical/secure-token-service/internal/session"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -18,21 +17,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// CookieManager defines the interface for cookie operations needed by gRPC server.
-type CookieManager interface {
-	Encode(name, value string) (string, error)
-	Decode(name, value string) (string, error)
-}
-
-// KeyManager defines the interface for JWT token operations needed by gRPC server.
-type KeyManager interface {
-	MintToken(subject, issuer, audience string, expirySeconds int, claims map[string]interface{}) (string, error)
-}
-
 // Server implements the SecurityTokenService gRPC interface.
 type Server struct {
 	stsv1.UnimplementedSecurityTokenServiceServer
-	sessionStore  *session.Store
+	sessionStore  SessionStore
 	keyManager    KeyManager
 	cookieManager CookieManager
 	jwtIssuer     string
@@ -56,9 +44,9 @@ func (s *Server) logger(ctx context.Context) *zap.Logger {
 }
 
 // NewServer creates a new gRPC server.
-func NewServer(store session.Store, km KeyManager, cm CookieManager, issuer, audience string, expiry int, obs *observability.Observability) *Server {
+func NewServer(store SessionStore, km KeyManager, cm CookieManager, issuer, audience string, expiry int, obs *observability.Observability) *Server {
 	return &Server{
-		sessionStore:  &store,
+		sessionStore:  store,
 		keyManager:    km,
 		cookieManager: cm,
 		jwtIssuer:     issuer,
@@ -75,24 +63,23 @@ func (s *Server) ExchangeSession(ctx context.Context, req *stsv1.ExchangeRequest
 	}
 
 	// Decode session cookie
-	sessID, err := s.cookieManager.Decode("session_id", req.SessionCookie)
+	sessionID, err := s.cookieManager.Decode("session_id", req.SessionCookie)
 	if err != nil {
-		s.logger(ctx).Error("failed to decode session cookie", zap.Error(err))
-		return nil, status.Error(codes.InvalidArgument, "invalid session cookie")
+		return nil, status.Errorf(codes.InvalidArgument, "invalid session cookie")
 	}
 
-	// Retrieve session from store
-	sess, err := (*s.sessionStore).Get(ctx, sessID)
+	// Get session from store
+	sess, err := s.sessionStore.Get(ctx, sessionID)
 	if err != nil {
 		s.logger(ctx).Error("failed to get session",
-			zap.String("session_id", sessID),
+			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return nil, status.Error(codes.NotFound, "session not found")
 	}
 
 	// TODO: Add custom claims from session/user profile
 	claims := map[string]interface{}{
-		"email": "user@example.com", // Placeholder
+		"email": sess.UserID,
 	}
 
 	// Mint internal JWT
@@ -120,12 +107,13 @@ func (s *Server) RevokeUserSessions(ctx context.Context, req *stsv1.RevokeUserRe
 		return nil, status.Error(codes.InvalidArgument, "user_id is required")
 	}
 
-	err := (*s.sessionStore).RevokeUserSessions(ctx, req.UserId)
+	err := s.sessionStore.RevokeUserSessions(ctx, req.UserId)
 	if err != nil {
 		s.logger(ctx).Error("failed to revoke sessions",
 			zap.String("user_id", req.UserId),
 			zap.Error(err))
-		return &stsv1.RevokeUserResponse{Success: false}, nil
+
+		return &stsv1.RevokeUserResponse{Success: false}, status.Error(codes.Internal, "failed to revoke sessions")
 	}
 
 	return &stsv1.RevokeUserResponse{Success: true}, nil

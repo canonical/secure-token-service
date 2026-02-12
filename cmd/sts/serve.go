@@ -90,12 +90,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 		zap.Bool("metrics", cfg.MetricsEnabled),
 		zap.Bool("tracing", cfg.TracingEnabled))
 
-	// Initialize Key Manager
-	keyManager, err := auth.NewKeyManager(ctx, jwksRepo)
+	// Initialize Valkey client for caching
+	valkeyClient, err := session.NewValkeyClient(cfg.CacheAddr, cfg.CachePassword, cfg.CacheDB)
+	if err != nil {
+		return fmt.Errorf("failed to initialize valkey client: %w", err)
+	}
+	obs.Logger.Info("valkey client initialized for caching")
+
+	// Initialize Key Manager with caching
+	cacheTTL := time.Duration(cfg.JWKSCacheTTL) * time.Second
+	keyManager, err := auth.NewKeyManager(ctx, jwksRepo, valkeyClient, cacheTTL)
 	if err != nil {
 		return fmt.Errorf("failed to initialize key manager: %w", err)
 	}
-	obs.Logger.Info("key manager initialized")
+	obs.Logger.Info("key manager initialized",
+		zap.Int("cache_ttl_seconds", cfg.JWKSCacheTTL))
 
 	// Initialize Session Store
 	sessionStore, err := session.NewValkeyStore(

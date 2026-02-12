@@ -17,19 +17,28 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/valkey-io/valkey-go"
 )
+
+// Cache-related constants
+const jwksCacheKey = "jwks:all"
 
 // KeyManager handles RSA key generation and JWT signing with database storage.
 type KeyManager struct {
-	repo db.JWKSRepository
-	ctx  context.Context
+	repo        db.JWKSRepository
+	ctx         context.Context
+	cacheClient valkey.Client // Valkey client for JWKS caching
+	cacheTTL    time.Duration // Cache TTL for JWKS
 }
 
-// NewKeyManager creates a new KeyManager that uses database storage.
-func NewKeyManager(ctx context.Context, repo db.JWKSRepository) (*KeyManager, error) {
+// NewKeyManager creates a new KeyManager that uses database storage and optional Valkey caching.
+// If cacheClient is nil or cacheTTL is 0, caching is disabled.
+func NewKeyManager(ctx context.Context, repo db.JWKSRepository, cacheClient valkey.Client, cacheTTL time.Duration) (*KeyManager, error) {
 	km := &KeyManager{
-		repo: repo,
-		ctx:  ctx,
+		repo:        repo,
+		ctx:         ctx,
+		cacheClient: cacheClient,
+		cacheTTL:    cacheTTL,
 	}
 
 	// Check if we have an active key, if not generate one
@@ -249,8 +258,8 @@ func (km *KeyManager) GetJWK() (jwk.Key, error) {
 	return key, nil
 }
 
-// GetAllJWKS returns all public keys (active + retired) as a JWK Set for the JWKS endpoint.
-func (km *KeyManager) GetAllJWKS() (jwk.Set, error) {
+// getAllJWKSFromDB returns all public keys (active + retired) as a JWK Set from the database.
+func (km *KeyManager) getAllJWKSFromDB() (jwk.Set, error) {
 	dbKeys, err := km.repo.GetAllPublicKeys(km.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all public keys: %w", err)
@@ -302,4 +311,54 @@ func (km *KeyManager) GetAllJWKS() (jwk.Set, error) {
 	}
 
 	return set, nil
+}
+
+// GetAllJWKS returns all public keys with Valkey caching.
+// Falls back to database if cache is unavailable or disabled.
+func (km *KeyManager) GetAllJWKS() (jwk.Set, error) {
+	// If caching is disabled, query database directly
+	if km.cacheClient == nil || km.cacheTTL == 0 {
+		return km.getAllJWKSFromDB()
+	}
+
+	// Try to get from cache
+	ctx := km.ctx
+	cachedData, err := km.cacheClient.Do(ctx, km.cacheClient.B().Get().Key(jwksCacheKey).Build()).AsBytes()
+	if err == nil && len(cachedData) > 0 {
+		// Cache hit - deserialize
+		set, err := jwk.Parse(cachedData)
+		if err == nil {
+			return set, nil
+		}
+		// If deserialization fails, fall through to database query
+	}
+
+	// Cache miss - query database
+	set, err := km.getAllJWKSFromDB()
+	if err != nil {
+		return nil, err
+	}
+
+	// Serialize and store in cache (best effort - don't fail on cache errors)
+	if data, err := json.Marshal(set); err == nil {
+		ttlSeconds := int64(km.cacheTTL.Seconds())
+		_ = km.cacheClient.Do(ctx, km.cacheClient.B().Setex().Key(jwksCacheKey).Seconds(ttlSeconds).Value(string(data)).Build()).Error()
+	}
+
+	return set, nil
+}
+
+// InvalidateJWKSCache removes the cached JWKS data.
+// Should be called after key rotation.
+func (km *KeyManager) InvalidateJWKSCache(ctx context.Context) error {
+	if km.cacheClient == nil {
+		return nil // No cache to invalidate
+	}
+
+	err := km.cacheClient.Do(ctx, km.cacheClient.B().Del().Key(jwksCacheKey).Build()).Error()
+	if err != nil {
+		return fmt.Errorf("failed to invalidate JWKS cache: %w", err)
+	}
+
+	return nil
 }

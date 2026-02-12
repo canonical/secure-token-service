@@ -6,21 +6,39 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
+
+// sanitizeName converts test names to valid container names
+// Container names must match: [a-zA-Z0-9][a-zA-Z0-9_.-]*
+func sanitizeName(name string) string {
+	name = strings.ReplaceAll(name, "/", "-")
+	name = strings.ReplaceAll(name, " ", "-")
+	name = strings.ToLower(name)
+	return name
+}
 
 func setupTestPostgres(t *testing.T) (*DB, *PostgresJWKSRepository, *postgres.PostgresContainer) {
 	ctx := context.Background()
 
-	// Start PostgreSQL container
+	// Start PostgreSQL container with unique name based on test name
+	containerName := fmt.Sprintf("sts-db-%s", sanitizeName(t.Name()))
 	pgContainer, err := postgres.Run(ctx,
 		"postgres:16-alpine",
 		postgres.WithDatabase("testdb"),
 		postgres.WithUsername("testuser"),
 		postgres.WithPassword("testpass"),
+		testcontainers.CustomizeRequest(testcontainers.GenericContainerRequest{
+			ContainerRequest: testcontainers.ContainerRequest{
+				Name: containerName,
+			},
+		}),
 	)
 	if err != nil {
 		t.Fatalf("Failed to start PostgreSQL container: %v", err)
@@ -59,6 +77,7 @@ func setupTestPostgres(t *testing.T) (*DB, *PostgresJWKSRepository, *postgres.Po
 }
 
 func TestPostgresJWKSRepository_SaveAndGetLatestActiveKey(t *testing.T) {
+	t.Parallel()
 	db, repo, container := setupTestPostgres(t)
 	defer func() {
 		db.Close()
@@ -101,6 +120,7 @@ func TestPostgresJWKSRepository_SaveAndGetLatestActiveKey(t *testing.T) {
 }
 
 func TestPostgresJWKSRepository_GetAllPublicKeys(t *testing.T) {
+	t.Parallel()
 	db, repo, container := setupTestPostgres(t)
 	defer func() {
 		db.Close()
@@ -152,6 +172,7 @@ func TestPostgresJWKSRepository_GetAllPublicKeys(t *testing.T) {
 }
 
 func TestPostgresJWKSRepository_RotateKey(t *testing.T) {
+	t.Parallel()
 	db, repo, container := setupTestPostgres(t)
 	defer func() {
 		db.Close()
@@ -223,6 +244,7 @@ func TestPostgresJWKSRepository_RotateKey(t *testing.T) {
 }
 
 func TestPostgresJWKSRepository_DeleteKey(t *testing.T) {
+	t.Parallel()
 	db, repo, container := setupTestPostgres(t)
 	defer func() {
 		db.Close()
