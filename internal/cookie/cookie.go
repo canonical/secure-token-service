@@ -71,9 +71,23 @@ func NewCookieManager(key []byte) *CookieManager {
 // Encode encodes a cookie name and value using chmike/securecookie.
 // This uses ChaCha20-Poly1305 AEAD for authenticated encryption.
 func (m *CookieManager) Encode(name, value string) (string, error) {
+	// Route to the appropriate cookie object based on name
+	var ck *securecookie.Obj
+	switch name {
+	case "session_id":
+		ck = m.sessionCk
+	case "oauth_state":
+		ck = m.oauthStateCk
+	case "oauth_nonce":
+		ck = m.oauthNonceCk
+	default:
+		// Default to session cookie for unknown names
+		ck = m.sessionCk
+	}
+
 	// Use httptest.NewRecorder() to capture the cookie value
 	recorder := httptest.NewRecorder()
-	if err := m.sessionCk.SetValue(recorder, []byte(value)); err != nil {
+	if err := ck.SetValue(recorder, []byte(value)); err != nil {
 		return "", fmt.Errorf("failed to encode cookie: %w", err)
 	}
 
@@ -94,6 +108,20 @@ func (m *CookieManager) Encode(name, value string) (string, error) {
 
 // Decode decodes a cookie name and value using chmike/securecookie.
 func (m *CookieManager) Decode(name, value string) (string, error) {
+	// Route to the appropriate cookie object based on name
+	var ck *securecookie.Obj
+	switch name {
+	case "session_id":
+		ck = m.sessionCk
+	case "oauth_state":
+		ck = m.oauthStateCk
+	case "oauth_nonce":
+		ck = m.oauthNonceCk
+	default:
+		// Default to session cookie for unknown names
+		ck = m.sessionCk
+	}
+
 	// Create a fake request with the cookie
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(&http.Cookie{
@@ -102,7 +130,7 @@ func (m *CookieManager) Decode(name, value string) (string, error) {
 	})
 
 	// Use securecookie to decode
-	decodedBytes, err := m.sessionCk.GetValue(nil, req)
+	decodedBytes, err := ck.GetValue(nil, req)
 	if err != nil {
 		return "", fmt.Errorf("failed to decode cookie: %w", err)
 	}

@@ -98,3 +98,39 @@ func TestCookieManager_ShortKey(t *testing.T) {
 		t.Errorf("Decoded value mismatch: got %q, want %q", decoded, value)
 	}
 }
+
+func TestCookieManager_DifferentCookieNames(t *testing.T) {
+	// Test that different cookie names use different cookie objects
+	key := securecookie.MustGenerateRandomKey()
+	cm := cookie.NewCookieManager(key)
+
+	tests := []struct {
+		name string
+	}{
+		{"session_id"},
+		{"oauth_state"},
+		{"oauth_nonce"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			value := "test-value-" + tt.name
+
+			// Encode with specific cookie name
+			encoded, err := cm.Encode(tt.name, value)
+			if err != nil {
+				t.Fatalf("Failed to encode %s: %v", tt.name, err)
+			}
+
+			// Decode should work with same cookie name
+			decoded, err := cm.Decode(tt.name, encoded)
+			if err != nil {
+				t.Fatalf("Failed to decode %s: %v", tt.name, err)
+			}
+
+			if decoded != value {
+				t.Errorf("Decoded value mismatch for %s: got %q, want %q", tt.name, decoded, value)
+			}
+		})
+	}
+}
