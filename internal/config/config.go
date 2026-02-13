@@ -28,9 +28,10 @@ type Config struct {
 	PublicKeyPath  string `envconfig:"PUBLIC_KEY_PATH" default:"./keys/public.pem"`
 
 	// JWT Settings
-	JWTIssuer   string `envconfig:"JWT_ISSUER" default:"session-service"`
-	JWTAudience string `envconfig:"JWT_AUDIENCE" default:"internal-services"`
-	JWTExpiry   int    `envconfig:"JWT_EXPIRY" default:"3600"` // seconds
+	JWTIssuer     string `envconfig:"JWT_ISSUER" default:"session-service"`
+	JWTAudience   string `envconfig:"JWT_AUDIENCE" default:"internal-services"`
+	JWTExpiry     int    `envconfig:"JWT_EXPIRY" default:"3600"`      // seconds
+	SessionExpiry int    `envconfig:"SESSION_EXPIRY" default:"86400"` // seconds (1 day)
 	// Cookie Encryption
 	CookieHashKey  string `envconfig:"COOKIE_HASH_KEY" default:"0123456789012345678901234567890123456789012345678901234567890123"` // 64 bytes
 	CookieBlockKey string `envconfig:"COOKIE_BLOCK_KEY" default:"01234567890123456789012345678901"`                                // 32 bytes

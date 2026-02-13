@@ -111,7 +111,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		cfg.CacheAddr,
 		cfg.CachePassword,
 		cfg.CacheDB,
-		time.Duration(cfg.JWTExpiry)*time.Second,
+		time.Duration(cfg.SessionExpiry)*time.Second,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to initialize session store: %w", err)

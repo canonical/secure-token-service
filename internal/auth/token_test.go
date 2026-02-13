@@ -3,7 +3,7 @@
 
 package auth
 
-//go:generate mockgen -build_flags=--mod=mod -package=mocks -destination=./mocks/mock_repository.go github.com/canonical/secure-token-service/internal/db JWKSRepository
+//go:generate mockgen -build_flags=--mod=mod -package=auth -destination=./mock_repository.go -source=../db/jwks_repository.go
 
 import (
 	"context"

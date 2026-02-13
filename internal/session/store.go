@@ -24,15 +24,28 @@ type Session struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// SetOptions holds optional configuration for Store.Set.
+type SetOptions struct {
+	TTL *time.Duration // nil = use default store TTL
+}
+
+// SetOption is a functional option for Store.Set.
+type SetOption func(*SetOptions)
+
+// WithTTL overrides the default TTL for a Set operation.
+func WithTTL(ttl time.Duration) SetOption {
+	return func(o *SetOptions) {
+		o.TTL = &ttl
+	}
+}
+
 // Store defines the interface for session storage.
-// TODO: Add session timeout enforcement with sliding window and periodic refresh
-// to prevent long-lived sessions from becoming a security risk. Currently sessions
-// rely solely on cookie expiry which may not be sufficient for high-security environments.
 type Store interface {
 	Get(ctx context.Context, sessionID string) (*Session, error)
-	Set(ctx context.Context, session *Session) error
+	Set(ctx context.Context, session *Session, opts ...SetOption) error
 	Delete(ctx context.Context, sessionID string) error
 	RevokeUserSessions(ctx context.Context, userID string) error
+	ListAllExpiring(ctx context.Context) ([]*Session, error)
 }
 
 // ValkeyStore implements Store using Valkey.
@@ -90,7 +103,17 @@ func (s *ValkeyStore) Get(ctx context.Context, sessionID string) (*Session, erro
 }
 
 // Set stores a session in Valkey.
-func (s *ValkeyStore) Set(ctx context.Context, session *Session) error {
+func (s *ValkeyStore) Set(ctx context.Context, session *Session, opts ...SetOption) error {
+	options := SetOptions{}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
+	ttl := s.ttl
+	if options.TTL != nil {
+		ttl = *options.TTL
+	}
+
 	key := fmt.Sprintf("session:%s", session.SessionID)
 	userSessionKey := fmt.Sprintf("user_sessions:%s", session.UserID)
 
@@ -100,7 +123,7 @@ func (s *ValkeyStore) Set(ctx context.Context, session *Session) error {
 	}
 
 	// Store session
-	if err := s.client.Set(ctx, key, data, s.ttl).Err(); err != nil {
+	if err := s.client.Set(ctx, key, data, ttl).Err(); err != nil {
 		return fmt.Errorf("failed to set session: %w", err)
 	}
 
@@ -161,6 +184,53 @@ func (s *ValkeyStore) RevokeUserSessions(ctx context.Context, userID string) err
 	}
 
 	return nil
+}
+
+// expiryThreshold is the TTL threshold below which sessions are considered expiring.
+const expiryThreshold = 2 * time.Hour
+
+// ListAllExpiring returns sessions with less than 2h TTL remaining.
+func (s *ValkeyStore) ListAllExpiring(ctx context.Context) ([]*Session, error) {
+	var sessions []*Session
+	var cursor uint64
+
+	for {
+		keys, nextCursor, err := s.client.Scan(ctx, cursor, "session:*", 100).Result()
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan sessions: %w", err)
+		}
+
+		for _, key := range keys {
+			// Check remaining TTL
+			ttl, err := s.client.TTL(ctx, key).Result()
+			if err != nil || ttl <= 0 {
+				continue
+			}
+			if ttl > expiryThreshold {
+				continue
+			}
+
+			data, err := s.client.Get(ctx, key).Result()
+			if err != nil {
+				// Session may have expired between scan and get
+				continue
+			}
+
+			var sess Session
+			if err := json.Unmarshal([]byte(data), &sess); err != nil {
+				continue
+			}
+
+			sessions = append(sessions, &sess)
+		}
+
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+
+	return sessions, nil
 }
 
 // Close closes the Valkey connection.
