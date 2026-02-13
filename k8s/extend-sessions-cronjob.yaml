@@ -1,0 +1,47 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: sts-extend-sessions
+  labels:
+    app: secure-token-service
+    component: session-extension
+spec:
+  # Run every 4 hours
+  schedule: "0 */4 * * *"
+  
+  # Keep history for auditing
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  
+  jobTemplate:
+    metadata:
+      labels:
+        app: secure-token-service
+        component: session-extension
+    spec:
+      template:
+        metadata:
+          labels:
+            app: secure-token-service
+            component: session-extension
+        spec:
+          serviceAccountName: secure-token-service
+          restartPolicy: OnFailure
+          
+          containers:
+          - name: extend-sessions
+            image: secure-token-service
+            command: ["/usr/bin/app"]
+            args: ["extend-sessions"]
+            envFrom:
+            - configMapRef:
+                name: secure-token-service-config
+            - secretRef:
+                name: secure-token-service-secret
+            resources:
+              requests:
+                memory: "64Mi"
+                cpu: "100m"
+              limits:
+                memory: "128Mi"
+                cpu: "500m"

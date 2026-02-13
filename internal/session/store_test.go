@@ -13,7 +13,6 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/valkey"
 	valkeygo "github.com/valkey-io/valkey-go"
-	"github.com/valkey-io/valkey-go/valkeycompat"
 )
 
 // sanitizeName converts test names to valid container names
@@ -60,13 +59,9 @@ func setupTestValkey(t *testing.T) (*ValkeyStore, *valkey.ValkeyContainer) {
 		t.Fatalf("Failed to create valkey client: %v", err)
 	}
 
-	// Create compat adapter
-	client := valkeycompat.NewAdapter(valkeyClient)
-
 	store := &ValkeyStore{
-		client:       client,
-		valkeyClient: valkeyClient,
-		ttl:          1 * time.Hour,
+		client: valkeyClient,
+		ttl:    1 * time.Hour,
 	}
 
 	return store, valkeyContainer
@@ -266,7 +261,7 @@ func TestValkeyStore_UserSessionTracking(t *testing.T) {
 	}
 
 	// Verify user session tracking
-	members, err := store.client.SMembers(ctx, "user_sessions:user_track").Result()
+	members, err := store.client.Do(ctx, store.client.B().Smembers().Key("user_sessions:user_track").Build()).AsStrSlice()
 	if err != nil {
 		t.Fatalf("Failed to get user sessions: %v", err)
 	}

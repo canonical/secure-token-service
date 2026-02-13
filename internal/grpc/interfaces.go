@@ -4,7 +4,7 @@
 // Package grpcserver provides the gRPC server implementation for the Secure Token Service.
 package grpcserver
 
-//go:generate mockgen -build_flags=--mod=mod -package mocks -destination ./mocks/mock_interfaces.go -source=./interfaces.go
+//go:generate mockgen -build_flags=--mod=mod -package grpcserver -destination ./mock_interfaces.go -source=./interfaces.go
 
 import (
 	"context"
