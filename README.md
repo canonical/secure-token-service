@@ -355,7 +355,7 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 | `OIDC_CLIENT_ID` | - | OAuth2 client ID |
 | `OIDC_CLIENT_SECRET` | - | OAuth2 client secret |
 | `OIDC_REDIRECT_URL` | `http://localhost:8080/auth/callback` | OAuth2 redirect URI |
-| `COOKIE_KEY` | - | 32-byte hex key for ChaCha20-Poly1305 AEAD (required) |
+| `COOKIE_KEY` | - | 32-character string for ChaCha20-Poly1305 (required) |
 
 ---
 
@@ -724,8 +724,8 @@ OIDC_CLIENT_ID=your-client-id
 OIDC_CLIENT_SECRET=your-client-secret
 OIDC_REDIRECT_URL=http://localhost:8080/auth/callback
 
-# Cookie encryption (32-character string = 32 bytes)
-COOKIE_KEY=$(openssl rand -base64 32 | tr -d '\n' | cut -c1-32)
+# Cookie encryption (32 random bytes as a string)
+COOKIE_KEY=$(head -c 32 /dev/urandom | base64 | tr -d '\n' | cut -c1-32)
 EOF
 
 # Load environment variables

@@ -134,3 +134,44 @@ func TestCookieManager_DifferentCookieNames(t *testing.T) {
 		})
 	}
 }
+
+func TestCookieManager_LongKey(t *testing.T) {
+	// Test with a long key (should be truncated to 32 bytes)
+	longKey := make([]byte, 64)
+	for i := range longKey {
+		longKey[i] = byte(i)
+	}
+
+	cm := cookie.NewCookieManager(longKey)
+
+	name := "session_id"
+	value := "test-value"
+
+	encoded, err := cm.Encode(name, value)
+	if err != nil {
+		t.Fatalf("Failed to encode: %v", err)
+	}
+
+	// Decode should work with truncated key
+	decoded, err := cm.Decode(name, encoded)
+	if err != nil {
+		t.Fatalf("Failed to decode: %v", err)
+	}
+
+	if decoded != value {
+		t.Errorf("Decoded value mismatch: got %q, want %q", decoded, value)
+	}
+
+	// Verify that a manager with the truncated key works identically
+	truncatedKey := longKey[:32]
+	cm2 := cookie.NewCookieManager(truncatedKey)
+
+	decoded2, err := cm2.Decode(name, encoded)
+	if err != nil {
+		t.Fatalf("Failed to decode with truncated key: %v", err)
+	}
+
+	if decoded2 != value {
+		t.Errorf("Decoded value mismatch with truncated key: got %q, want %q", decoded2, value)
+	}
+}

@@ -69,6 +69,8 @@ func NewCookieManager(key []byte) *CookieManager {
 }
 
 // getCookieObject returns the appropriate cookie object based on the cookie name.
+// For unknown names, it defaults to sessionCk to maintain backward compatibility
+// and avoid breaking existing code that may use custom cookie names.
 func (m *CookieManager) getCookieObject(name string) *securecookie.Obj {
 	switch name {
 	case "session_id":
