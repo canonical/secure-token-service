@@ -66,15 +66,15 @@ We chose **`github.com/chmike/securecookie`** over **`github.com/gorilla/securec
 ```go
 // Cookie manager using chmike/securecookie
 type CookieManager struct {
-    obj        *securecookie.Obj
-    hashKey    []byte
-    blockKey   []byte
+    key          []byte
+    sessionCk    *securecookie.Obj
+    oauthStateCk *securecookie.Obj
+    oauthNonceCk *securecookie.Obj
 }
 ```
 
 Configuration via environment variables:
-- `COOKIE_HASH_KEY` - 64-byte key for authentication
-- `COOKIE_BLOCK_KEY` - 32-byte key for encryption
+- `COOKIE_KEY` - 32-byte key for ChaCha20-Poly1305 AEAD (authenticated encryption with associated data)
 
 ## References
 

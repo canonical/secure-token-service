@@ -41,7 +41,6 @@ data:
   
   # Note: Sensitive values should be in Secret, not ConfigMap:
   # - CACHE_PASSWORD (Secret)
-  # - COOKIE_HASH_KEY (Secret)
-  # - COOKIE_BLOCK_KEY (Secret)
+  # - COOKIE_KEY (Secret)
   # - OIDC_CLIENT_ID (Secret)
   # - OIDC_CLIENT_SECRET (Secret)

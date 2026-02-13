@@ -67,8 +67,7 @@ func runCreateCookie(cmd *cobra.Command, args []string) error {
 
 	// Initialize Cookie Manager
 	cookieManager := cookie.NewCookieManager(
-		[]byte(cfg.CookieHashKey),
-		[]byte(cfg.CookieBlockKey),
+		[]byte(cfg.CookieKey),
 	)
 
 	// Generate Session ID if not provided

@@ -33,8 +33,7 @@ type Config struct {
 	JWTExpiry     int    `envconfig:"JWT_EXPIRY" default:"3600"`      // seconds
 	SessionExpiry int    `envconfig:"SESSION_EXPIRY" default:"86400"` // seconds (1 day)
 	// Cookie Encryption
-	CookieHashKey  string `envconfig:"COOKIE_HASH_KEY" default:"0123456789012345678901234567890123456789012345678901234567890123"` // 64 bytes
-	CookieBlockKey string `envconfig:"COOKIE_BLOCK_KEY" default:"01234567890123456789012345678901"`                                // 32 bytes
+	CookieKey string `envconfig:"COOKIE_KEY" default:"01234567890123456789012345678901"` // 32 bytes for ChaCha20-Poly1305
 
 	// OIDC Configuration
 	OIDCProviderURL  string   `envconfig:"OIDC_PROVIDER_URL" required:"true"`

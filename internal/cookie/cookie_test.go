@@ -11,10 +11,9 @@ import (
 )
 
 func TestCookieManager_EncodeDecode(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
-	blockKey := securecookie.MustGenerateRandomKey()
+	key := securecookie.MustGenerateRandomKey()
 
-	cm := cookie.NewCookieManager(hashKey, blockKey)
+	cm := cookie.NewCookieManager(key)
 
 	name := "session_id"
 	value := "test-session-value-123"
@@ -41,10 +40,9 @@ func TestCookieManager_EncodeDecode(t *testing.T) {
 }
 
 func TestCookieManager_DecodeInvalid(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
-	blockKey := securecookie.MustGenerateRandomKey()
+	key := securecookie.MustGenerateRandomKey()
 
-	cm := cookie.NewCookieManager(hashKey, blockKey)
+	cm := cookie.NewCookieManager(key)
 
 	// Test decoding invalid value
 	_, err := cm.Decode("session_id", "invalid-cookie-value")
@@ -54,13 +52,11 @@ func TestCookieManager_DecodeInvalid(t *testing.T) {
 }
 
 func TestCookieManager_WrongKey(t *testing.T) {
-	hashKey1 := securecookie.MustGenerateRandomKey()
-	blockKey1 := securecookie.MustGenerateRandomKey()
-	cm1 := cookie.NewCookieManager(hashKey1, blockKey1)
+	key1 := securecookie.MustGenerateRandomKey()
+	cm1 := cookie.NewCookieManager(key1)
 
-	hashKey2 := securecookie.MustGenerateRandomKey()
-	blockKey2 := securecookie.MustGenerateRandomKey()
-	cm2 := cookie.NewCookieManager(hashKey2, blockKey2)
+	key2 := securecookie.MustGenerateRandomKey()
+	cm2 := cookie.NewCookieManager(key2)
 
 	name := "session_id"
 	value := "secret-data"
@@ -78,13 +74,14 @@ func TestCookieManager_WrongKey(t *testing.T) {
 	}
 }
 
-func TestCookieManager_NoEncryption(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
-	// No block key (no encryption, only signing)
-	cm := cookie.NewCookieManager(hashKey, nil)
+func TestCookieManager_ShortKey(t *testing.T) {
+	// Test with a short key (should be padded to 32 bytes)
+	key := []byte("short-key")
 
-	name := "public_data"
-	value := "visible-but-signed"
+	cm := cookie.NewCookieManager(key)
+
+	name := "session_id"
+	value := "test-value"
 
 	encoded, err := cm.Encode(name, value)
 	if err != nil {

@@ -355,8 +355,7 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 | `OIDC_CLIENT_ID` | - | OAuth2 client ID |
 | `OIDC_CLIENT_SECRET` | - | OAuth2 client secret |
 | `OIDC_REDIRECT_URL` | `http://localhost:8080/auth/callback` | OAuth2 redirect URI |
-| `COOKIE_HASH_KEY` | - | 64-byte hex key for HMAC (required) |
-| `COOKIE_BLOCK_KEY` | - | 32-byte hex key for AES (required) |
+| `COOKIE_KEY` | - | 32-byte hex key for ChaCha20-Poly1305 AEAD (required) |
 
 ---
 
@@ -725,9 +724,8 @@ OIDC_CLIENT_ID=your-client-id
 OIDC_CLIENT_SECRET=your-client-secret
 OIDC_REDIRECT_URL=http://localhost:8080/auth/callback
 
-# Cookies (generate secure random keys!)
-COOKIE_HASH_KEY=$(openssl rand -hex 64)
-COOKIE_BLOCK_KEY=$(openssl rand -hex 32)
+# Cookie encryption (generate secure random key!)
+COOKIE_KEY=$(openssl rand -hex 16)
 EOF
 
 # Load environment variables
@@ -1123,7 +1121,7 @@ Returns the JSON Web Key Set containing all public keys (active + retired) for J
 
 ### Production Checklist
 
-- [ ] Configure strong `COOKIE_HASH_KEY` and `COOKIE_BLOCK_KEY` (cryptographically random)
+- [ ] Configure strong `COOKIE_KEY` (cryptographically random, 32 bytes)
 - [ ] Enable PostgreSQL SSL mode (`sslmode=require`)
 - [ ] Enable Valkey/Redis AUTH and TLS
 - [ ] Set up automated JWKS rotation (cron job every 90 days)
