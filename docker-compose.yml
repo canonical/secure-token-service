@@ -45,8 +45,8 @@ services:
       JWT_AUDIENCE: "internal-services"
       JWT_EXPIRY: "3600"
 
-      # Cookie Encryption (CHANGE THIS IN PRODUCTION!)
-      COOKIE_KEY: "0123456789012345678901234567890123456789012345678901234567890123"
+      # Cookie Encryption (32 chars = 32 bytes, CHANGE THIS IN PRODUCTION!)
+      COOKIE_KEY: "01234567890123456789012345678901"
 
       # OIDC Configuration (Update with your provider)
       OIDC_PROVIDER_URL: "https://accounts.google.com"

@@ -724,8 +724,8 @@ OIDC_CLIENT_ID=your-client-id
 OIDC_CLIENT_SECRET=your-client-secret
 OIDC_REDIRECT_URL=http://localhost:8080/auth/callback
 
-# Cookie encryption (generate secure random key!)
-COOKIE_KEY=$(openssl rand -hex 32)
+# Cookie encryption (32-character string = 32 bytes)
+COOKIE_KEY=$(openssl rand -base64 32 | tr -d '\n' | cut -c1-32)
 EOF
 
 # Load environment variables
