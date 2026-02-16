@@ -42,7 +42,7 @@ spec:
           - name: migrate
             image: secure-token-service
             command: ["/usr/bin/app"]
-            args: ["migrate"]
+            args: ["migrate", "up"]
             envFrom:
             - configMapRef:
                 name: secure-token-service-config

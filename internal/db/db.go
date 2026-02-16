@@ -9,10 +9,12 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/pressly/goose/v3"
 )
 
 //go:embed migrations/*.sql
-var migrationsFS embed.FS
+var MigrationsFS embed.FS
 
 // DB wraps a PostgreSQL connection pool.
 type DB struct {
@@ -40,17 +42,20 @@ func (db *DB) Close() {
 	db.pool.Close()
 }
 
-// RunMigrations executes the SQL migrations.
+// RunMigrations executes the SQL migrations using goose.
 func (db *DB) RunMigrations(ctx context.Context) error {
-	// Read the up migration file
-	migrationSQL, err := migrationsFS.ReadFile("migrations/001_create_jwks_table.sql")
-	if err != nil {
-		return fmt.Errorf("failed to read migration file: %w", err)
+	goose.SetBaseFS(MigrationsFS)
+
+	if err := goose.SetDialect("postgres"); err != nil {
+		return fmt.Errorf("failed to set dialect: %w", err)
 	}
 
-	// Execute migration
-	if _, err := db.pool.Exec(ctx, string(migrationSQL)); err != nil {
-		return fmt.Errorf("failed to execute migration: %w", err)
+	// Convert pgx pool config to stdlib db for goose
+	stdDB := stdlib.OpenDB(*db.pool.Config().ConnConfig)
+	defer stdDB.Close()
+
+	if err := goose.Up(stdDB, "migrations"); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
 	}
 
 	return nil
