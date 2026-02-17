@@ -121,7 +121,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Initialize Cookie Manager
 	cookieManager := cookie.NewCookieManager(
 		[]byte(cfg.CookieHashKey),
-		[]byte(cfg.CookieBlockKey),
 	)
 	obs.Logger.Info("cookie manager initialized")
 
