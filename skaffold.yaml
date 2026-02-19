@@ -1,0 +1,47 @@
+apiVersion: skaffold/v4beta1
+kind: Config
+build:
+  artifacts:
+  - image: secure-token-service
+    sync:
+    custom:
+      buildCommand: ./build.sh
+      dependencies:
+        paths:
+          - rockcraft.yaml
+    platforms: ["linux/amd64"]
+manifests:
+  kustomize:
+    paths:
+    - k8s
+
+test:
+- image: "secure-token-service"
+  structureTests:
+    - './structure-tests.yaml'
+
+deploy:
+  helm:
+    releases:
+    - name: valkey
+      createNamespace: true
+      namespace: data
+      remoteChart: oci://registry-1.docker.io/bitnamicharts/valkey
+      setValues:
+        auth.enabled: "false"
+        fullnameOverride: "valkey"
+        architecture: "standalone"
+        networkPolicy.enabled: "false"
+    - name: postgresql
+      createNamespace: true
+      namespace: data
+      remoteChart: oci://registry-1.docker.io/bitnamicharts/postgresql
+      setValues:
+        auth.username: "stsuser"
+        auth.password: "stspassword"
+        auth.database: "sts"
+        fullnameOverride: "postgresql"
+        primary.persistence.enabled: "true"
+        primary.persistence.size: "1Gi"
+        primary.networkPolicy.enabled: "false"
+  kubectl: {}

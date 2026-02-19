@@ -30,3 +30,23 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Project-specific
+bin/
+keys/
+*.pem
+
+# K8s secrets
+ghcr-secret.yaml
+# Mocks are generated, not committed
+internal/http/mocks/
+internal/grpc/mocks/
+internal/auth/mocks/
+internal/session/mocks/
+internal/db/mocks/
+**/mocks/
+**/mock_*.go
+
+
+# Vendor
+vendor/
