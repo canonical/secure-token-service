@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/canonical/secure-token-service/compare/v0.2.0...v0.2.1) (2026-03-20)
+
+
+### Bug Fixes
+
+* ci artifact name ([f2380a7](https://github.com/canonical/secure-token-service/commit/f2380a73ac775398e5dc6f3e9d59999b6c1c70e1))
+* ci artifact name ([#15](https://github.com/canonical/secure-token-service/issues/15)) ([6bccf2c](https://github.com/canonical/secure-token-service/commit/6bccf2cd7d9a39280c17dead649d106b978d6a88))
+
 ## [0.2.0](https://github.com/canonical/secure-token-service/compare/v0.1.0...v0.2.0) (2026-03-20)
 
 
