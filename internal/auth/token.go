@@ -5,8 +5,9 @@ package auth
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -23,7 +24,7 @@ import (
 // Cache-related constants
 const jwksCacheKey = "jwks:all"
 
-// KeyManager handles RSA key generation and JWT signing with database storage.
+// KeyManager handles ECDSA key generation and JWT signing with database storage.
 type KeyManager struct {
 	repo        db.JWKSRepository
 	ctx         context.Context
@@ -53,18 +54,21 @@ func NewKeyManager(ctx context.Context, repo db.JWKSRepository, cacheClient valk
 	return km, nil
 }
 
-// generateAndSaveKey generates a new RSA key pair and saves it to the database.
+// generateAndSaveKey generates a new ECDSA P-256 key pair and saves it to the database.
 func (km *KeyManager) generateAndSaveKey() error {
-	// Generate 2048-bit RSA key
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	// Generate ECDSA P-256 key
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return fmt.Errorf("failed to generate RSA key: %w", err)
+		return fmt.Errorf("failed to generate ECDSA key: %w", err)
 	}
 
 	// Marshal private key to PEM
-	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateKeyBytes, err := x509.MarshalECPrivateKey(privateKey)
+	if err != nil {
+		return fmt.Errorf("failed to marshal private key: %w", err)
+	}
 	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PRIVATE KEY",
+		Type:  "EC PRIVATE KEY",
 		Bytes: privateKeyBytes,
 	})
 
@@ -83,10 +87,10 @@ func (km *KeyManager) generateAndSaveKey() error {
 
 	// Store complete key data as JSONB
 	keyData := map[string]interface{}{
-		"kty":         "RSA",
+		"kty":         "EC",
 		"kid":         kid,
 		"use":         "sig",
-		"alg":         "RS256",
+		"alg":         "ES256",
 		"private_pem": string(privateKeyPEM),
 		"public_pem":  string(publicKeyPEM),
 	}
@@ -113,7 +117,7 @@ func (km *KeyManager) generateAndSaveKey() error {
 }
 
 // getLatestPrivateKey fetches the latest active key and extracts the private key for signing.
-func (km *KeyManager) getLatestPrivateKey() (*rsa.PrivateKey, string, error) {
+func (km *KeyManager) getLatestPrivateKey() (*ecdsa.PrivateKey, string, error) {
 	dbKey, err := km.repo.GetLatestActiveKey(km.ctx)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get latest active key: %w", err)
@@ -143,7 +147,7 @@ func (km *KeyManager) getLatestPrivateKey() (*rsa.PrivateKey, string, error) {
 		return nil, "", fmt.Errorf("failed to decode private key PEM")
 	}
 
-	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	privateKey, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to parse private key: %w", err)
 	}
@@ -151,7 +155,7 @@ func (km *KeyManager) getLatestPrivateKey() (*rsa.PrivateKey, string, error) {
 	return privateKey, kid, nil
 }
 
-// MintToken creates a new internal JWT signed with RS256 using the latest active key.
+// MintToken creates a new internal JWT signed with ES256 using the latest active key.
 func (km *KeyManager) MintToken(subject, issuer, audience string, expirySeconds int, claims map[string]interface{}) (string, error) {
 	// ALWAYS get the latest key for signing
 	privateKey, kid, err := km.getLatestPrivateKey()
@@ -175,14 +179,14 @@ func (km *KeyManager) MintToken(subject, issuer, audience string, expirySeconds 
 		tokenClaims[k] = v
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodRS256, tokenClaims)
+	token := jwt.NewWithClaims(jwt.SigningMethodES256, tokenClaims)
 	token.Header["kid"] = kid // Set KID in JWT header
 
 	return token.SignedString(privateKey)
 }
 
 // GetPublicKey returns the latest active public key.
-func (km *KeyManager) GetPublicKey() (*rsa.PublicKey, error) {
+func (km *KeyManager) GetPublicKey() (*ecdsa.PublicKey, error) {
 	dbKey, err := km.repo.GetLatestActiveKey(km.ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get latest active key: %w", err)
@@ -211,12 +215,12 @@ func (km *KeyManager) GetPublicKey() (*rsa.PublicKey, error) {
 		return nil, fmt.Errorf("failed to parse public key: %w", err)
 	}
 
-	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
+	ecdsaPublicKey, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return nil, fmt.Errorf("key is not an RSA public key")
+		return nil, fmt.Errorf("key is not an ECDSA public key")
 	}
 
-	return rsaPublicKey, nil
+	return ecdsaPublicKey, nil
 }
 
 // GetJWK returns the latest active public key as a JWK with proper metadata.
@@ -248,7 +252,7 @@ func (km *KeyManager) GetJWK() (jwk.Key, error) {
 	if err := key.Set(jwk.KeyIDKey, kid); err != nil {
 		return nil, fmt.Errorf("failed to set key ID: %w", err)
 	}
-	if err := key.Set(jwk.AlgorithmKey, "RS256"); err != nil {
+	if err := key.Set(jwk.AlgorithmKey, "ES256"); err != nil {
 		return nil, fmt.Errorf("failed to set algorithm: %w", err)
 	}
 	if err := key.Set(jwk.KeyUsageKey, "sig"); err != nil {
@@ -291,20 +295,20 @@ func (km *KeyManager) getAllJWKSFromDB() (jwk.Set, error) {
 			continue
 		}
 
-		rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
+		ecdsaPublicKey, ok := publicKey.(*ecdsa.PublicKey)
 		if !ok {
 			continue
 		}
 
 		// Create JWK
-		key, err := jwk.FromRaw(rsaPublicKey)
+		key, err := jwk.FromRaw(ecdsaPublicKey)
 		if err != nil {
 			continue
 		}
 
 		kid, _ := keyData["kid"].(string)
 		key.Set(jwk.KeyIDKey, kid)
-		key.Set(jwk.AlgorithmKey, "RS256")
+		key.Set(jwk.AlgorithmKey, "ES256")
 		key.Set(jwk.KeyUsageKey, "sig")
 
 		set.AddKey(key)

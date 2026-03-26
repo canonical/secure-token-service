@@ -23,7 +23,7 @@ type Config struct {
 	// gRPC Server
 	GRPCPort string `envconfig:"GRPC_PORT" default:"9090"`
 
-	// RSA Keys
+	// Keys
 	PrivateKeyPath string `envconfig:"PRIVATE_KEY_PATH" default:"./keys/private.pem"`
 	PublicKeyPath  string `envconfig:"PUBLIC_KEY_PATH" default:"./keys/public.pem"`
 

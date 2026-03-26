@@ -21,7 +21,7 @@ message ExchangeSessionRequest {
 }
 
 message ExchangeSessionResponse {
-  string internal_jwt = 1;    // RS256-signed JWT
+  string internal_jwt = 1;    // ES256-signed JWT
   string user_id = 2;          // User identifier from session
   int64 expires_at = 3;        // Unix timestamp when JWT expires
 }
@@ -45,14 +45,14 @@ Exchanges an opaque session cookie for a signed internal JWT containing user ide
 ### Response (Success)
 ```json
 {
-  "internal_jwt": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImpudXMta2V5LWFiYzEyMyJ9...",
+  "internal_jwt": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImpudXMta2V5LWFiYzEyMyJ9...",
   "user_id": "user-uuid-1234",
   "expires_at": 1234567890
 }
 ```
 
 **Fields**:
-- `internal_jwt` (string): RS256-signed JWT with user claims
+- `internal_jwt` (string): ES256-signed JWT with user claims
 - `user_id` (string): User identifier from the session
 - `expires_at` (int64): Unix timestamp when JWT expires
 

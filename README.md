@@ -24,7 +24,7 @@ Janus is a **Policy Enforcement Point (PEP)** and **Security Token Service (STS)
 
 - **Session Management**: Exchanges OIDC tokens for opaque HttpOnly cookies
 - **Token Translation**: Converts opaque session IDs to signed internal JWTs
-- **JWT Issuance**: Mints RS256-signed JWTs for service-to-service communication
+- **JWT Issuance**: Mints ES256-signed JWTs for service-to-service communication
 - **Key Management**: PostgreSQL-backed JWKS with atomic key rotation
 - **Session Storage**: Valkey/Redis-based session persistence
 
@@ -151,7 +151,7 @@ sequenceDiagram
     Janus->>Postgres: GetLatestActiveKey()
     Postgres-->>Janus: Private key + KID
     
-    Janus->>Janus: Mint JWT (RS256)<br/>Claims: sub, iss, aud, exp, custom
+    Janus->>Janus: Mint JWT (ES256)<br/>Claims: sub, iss, aud, exp, custom
     Janus-->>Gateway: Internal JWT + expires_in
     
     Gateway->>Service: Request + Authorization: Bearer <JWT>
@@ -174,7 +174,7 @@ sequenceDiagram
     participant Postgres
     
     Admin->>CLI: ./bin/sts rotate-key
-    CLI->>CLI: Generate new RSA key pair (2048-bit)
+    CLI->>CLI: Generate new ECDSA P-256 key pair
     CLI->>CLI: Create JSONB entry<br/>(kid, public_pem, private_pem)
     
     CLI->>Postgres: BEGIN TRANSACTION
@@ -249,9 +249,9 @@ grpcurl -plaintext -d '{"user_id": "user-123"}' \
 ### Key Manager (`internal/auth/token.go`)
 
 **Responsibilities**:
-- Generate RSA key pairs on first boot
+- Generate ECDSA P-256 key pairs on first boot
 - Fetch latest active key from PostgreSQL for signing
-- Mint RS256-signed JWTs with custom claims
+- Mint ES256-signed JWTs with custom claims
 - Provide JWKS for verification
 
 **Key Change**: `MintToken()` **always fetches the latest active key** from the database before signing, ensuring zero-downtime rotation.
@@ -307,11 +307,11 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 
 ```json
 {
-  "kty": "RSA",
+  "kty": "EC",
   "kid": "janus-key-a1b2c3d4",
   "use": "sig",
-  "alg": "RS256",
-  "private_pem": "-----BEGIN RSA PRIVATE KEY-----\n...",
+  "alg": "ES256",
+  "private_pem": "-----BEGIN EC PRIVATE KEY-----\n...",
   "public_pem": "-----BEGIN PUBLIC KEY-----\n..."
 }
 ```
@@ -325,7 +325,7 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 ```
 
 **What happens**:
-1. Generates new RSA key pair
+1. Generates new ECDSA P-256 key pair
 2. Moves all active keys to `"public.retired"` set
 3. Inserts new key into `"public"` set
 4. Both keys available via JWKS endpoint during rotation period
@@ -1032,7 +1032,7 @@ message ExchangeRequest {
 **Response**:
 ```protobuf
 message ExchangeResponse {
-  string access_token = 1;  // RS256-signed JWT
+  string access_token = 1;  // ES256-signed JWT
   int64 expires_in = 2;     // Seconds until expiration
 }
 ```
@@ -1079,20 +1079,22 @@ Returns the JSON Web Key Set containing all public keys (active + retired) for J
 {
   "keys": [
     {
-      "kty": "RSA",
+      "kty": "EC",
       "use": "sig",
-      "alg": "RS256",
+      "alg": "ES256",
       "kid": "janus-key-a1b2c3d4",
-      "n": "<base64url-encoded-modulus>",
-      "e": "AQAB"
+      "crv": "P-256",
+      "x": "<base64url-encoded-x-coordinate>",
+      "y": "<base64url-encoded-y-coordinate>"
     },
     {
-      "kty": "RSA",
+      "kty": "EC",
       "use": "sig",
-      "alg": "RS256",
+      "alg": "ES256",
       "kid": "janus-key-retired-xyz",
-      "n": "<base64url-encoded-modulus>",
-      "e": "AQAB"
+      "crv": "P-256",
+      "x": "<base64url-encoded-x-coordinate>",
+      "y": "<base64url-encoded-y-coordinate>"
     }
   ]
 }

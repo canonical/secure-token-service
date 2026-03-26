@@ -27,7 +27,7 @@ We implement the **Phantom Token Pattern** where:
 
 **Internal Layer (Gateway ↔ Services)**:
 - Short-lived JWTs (configurable expiry)
-- Signed with RS256 (asymmetric keys)
+- Signed with ES256 (ECDSA with P-256 curve)
 - Services verify locally (no network call to Janus)
 - Each request gets fresh JWT with current session state
 

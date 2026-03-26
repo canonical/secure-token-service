@@ -5,8 +5,9 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -71,17 +72,20 @@ func runRotateKey(cmd *cobra.Command, args []string) error {
 		log.Printf("Current active key: %s (created at %s)", currentKey.KID, currentKey.CreatedAt.Format(time.RFC3339))
 	}
 
-	// Generate new RSA key pair
-	log.Println("Generating new RSA key pair (2048-bit)...")
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	// Generate new ECDSA P-256 key pair
+	log.Println("Generating new ECDSA P-256 key pair...")
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return fmt.Errorf("failed to generate RSA key: %w", err)
+		return fmt.Errorf("failed to generate ECDSA key: %w", err)
 	}
 
 	// Marshal private key to PEM
-	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	privateKeyBytes, err := x509.MarshalECPrivateKey(privateKey)
+	if err != nil {
+		return fmt.Errorf("failed to marshal private key: %w", err)
+	}
 	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PRIVATE KEY",
+		Type:  "EC PRIVATE KEY",
 		Bytes: privateKeyBytes,
 	})
 
@@ -101,10 +105,10 @@ func runRotateKey(cmd *cobra.Command, args []string) error {
 
 	// Store complete key data as JSONB
 	keyData := map[string]interface{}{
-		"kty":         "RSA",
+		"kty":         "EC",
 		"kid":         kid,
 		"use":         "sig",
-		"alg":         "RS256",
+		"alg":         "ES256",
 		"private_pem": string(privateKeyPEM),
 		"public_pem":  string(publicKeyPEM),
 	}
