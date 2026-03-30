@@ -71,17 +71,14 @@ const (
 
 // Key management constants
 const (
-	// RSAKeySize is the size of RSA keys for JWT signing (2048 bits)
-	RSAKeySize = 2048
-
-	// JWTSigningAlgorithm is the algorithm used for JWT signing
-	JWTSigningAlgorithm = "RS256"
+	// JWTSigningAlgorithm is the algorithm used for JWT signing (ECDSA with P-256)
+	JWTSigningAlgorithm = "ES256"
 
 	// JWKKeyUsage is the usage type for JWK keys
 	JWKKeyUsage = "sig"
 
 	// JWKKeyType is the key type for JWK keys
-	JWKKeyType = "RSA"
+	JWKKeyType = "EC"
 )
 
 // OIDC configuration constants

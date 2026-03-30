@@ -196,12 +196,13 @@ paths:
                       $ref: '#/components/schemas/JWK'
               example:
                 keys:
-                  - kty: "RSA"
+                  - kty: "EC"
                     use: "sig"
-                    alg: "RS256"
+                    alg: "ES256"
                     kid: "janus-key-abc123"
-                    n: "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps..."
-                    e: "AQAB"
+                    crv: "P-256"
+                    x: "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU"
+                    y: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
         '500':
           description: Failed to retrieve JWKS
           content:
@@ -259,13 +260,14 @@ components:
         - use
         - alg
         - kid
-        - n
-        - e
+        - crv
+        - x
+        - y
       properties:
         kty:
           type: string
           description: Key type
-          example: "RSA"
+          example: "EC"
         use:
           type: string
           description: Key usage
@@ -273,19 +275,23 @@ components:
         alg:
           type: string
           description: Algorithm
-          example: "RS256"
+          example: "ES256"
         kid:
           type: string
           description: Key ID
           example: "janus-key-abc123"
-        n:
+        crv:
           type: string
-          description: RSA modulus (Base64url encoded)
-          example: "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM..."
-        e:
+          description: ECDSA curve name
+          example: "P-256"
+        x:
           type: string
-          description: RSA exponent (Base64url encoded)
-          example: "AQAB"
+          description: ECDSA X coordinate (Base64url encoded)
+          example: "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU"
+        y:
+          type: string
+          description: ECDSA Y coordinate (Base64url encoded)
+          example: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
 
   securitySchemes:
     SessionCookie:

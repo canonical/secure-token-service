@@ -315,9 +315,9 @@ func TestKeyManager_GetPublicKey(t *testing.T) {
 		t.Fatal("Public key should not be nil")
 	}
 
-	// Verify it's an RSA key
-	if publicKey.N == nil {
-		t.Error("Public key modulus should not be nil")
+	// Verify it's an ECDSA key
+	if publicKey.Curve == nil {
+		t.Error("Public key curve should not be nil")
 	}
 }
 
@@ -353,8 +353,8 @@ func TestKeyManager_GetJWK(t *testing.T) {
 	}
 
 	alg := jwkKey.Algorithm()
-	if alg.String() != "RS256" {
-		t.Errorf("Algorithm mismatch: got %v, want RS256", alg)
+	if alg.String() != "ES256" {
+		t.Errorf("Algorithm mismatch: got %v, want ES256", alg)
 	}
 
 	usage := jwkKey.KeyUsage()

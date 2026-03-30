@@ -6,7 +6,7 @@
 
 ## Context
 
-RS256 JWT signing requires private keys. Compromised keys or security best practices require periodic rotation. Rotation must not cause service interruption or invalidate existing valid JWTs.
+ES256 JWT signing requires private keys. Compromised keys or security best practices require periodic rotation. Rotation must not cause service interruption or invalidate existing valid JWTs.
 
 ## Decision
 
