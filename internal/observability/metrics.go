@@ -56,11 +56,17 @@ type MetricsProvider struct {
 // NewMetricsProvider creates a new OpenTelemetry metrics provider with OTLP and Prometheus exporters
 func NewMetricsProvider(config MetricsConfig) (*MetricsProvider, error) {
 	if !config.Enabled {
-		// Return no-op provider
-		return &MetricsProvider{
+		// Return no-op provider with initialized metrics instruments
+		mp := &MetricsProvider{
 			provider: nil,
 			meter:    otel.Meter("noop"),
-		}, nil
+		}
+
+		if err := mp.initializeMetrics(); err != nil {
+			return nil, fmt.Errorf("failed to initialize noop metrics: %w", err)
+		}
+
+		return mp, nil
 	}
 
 	// Create resource
