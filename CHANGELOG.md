@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/canonical/secure-token-service/compare/v0.2.1...v0.3.0) (2026-03-30)
+
+
+### Features
+
+* switch JWT signing from RSA (RS256) to ECDSA (ES256) ([241dcaf](https://github.com/canonical/secure-token-service/commit/241dcafa8eeefc5babec8a9013d141d5119b6886))
+
+
+### Bug Fixes
+
+* initialize metrics instruments when metrics provider is disabled ([4a9c2cb](https://github.com/canonical/secure-token-service/commit/4a9c2cb6e6ff08f8920d65c09b5879adc641e879))
+* initialize metrics instruments when metrics provider is disabled ([#20](https://github.com/canonical/secure-token-service/issues/20)) ([975012d](https://github.com/canonical/secure-token-service/commit/975012dd79aaa81fb775ea529acd59c126794638))
+
 ## [0.2.1](https://github.com/canonical/secure-token-service/compare/v0.2.0...v0.2.1) (2026-03-20)
 
 
