@@ -270,3 +270,107 @@ func TestValkeyStore_UserSessionTracking(t *testing.T) {
 		t.Errorf("User session tracking incorrect: got %v", members)
 	}
 }
+
+func TestNewValkeyStore_WithUsername(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	containerName := fmt.Sprintf("sts-session-%s", sanitizeName(t.Name()))
+	valkeyContainer, err := valkey.Run(ctx, "valkey/valkey:7.2-alpine",
+		testcontainers.CustomizeRequest(testcontainers.GenericContainerRequest{
+			ContainerRequest: testcontainers.ContainerRequest{
+				Name: containerName,
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("Failed to start Valkey container: %v", err)
+	}
+	defer func() {
+		if err := valkeyContainer.Terminate(ctx); err != nil {
+			t.Logf("Failed to terminate container: %v", err)
+		}
+	}()
+
+	host, err := valkeyContainer.Host(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get container host: %v", err)
+	}
+	port, err := valkeyContainer.MappedPort(ctx, "6379/tcp")
+	if err != nil {
+		t.Fatalf("Failed to get container port: %v", err)
+	}
+	addr := host + ":" + port.Port()
+
+	store, err := NewValkeyStore(addr, "default", "", 0, time.Hour)
+	if err != nil {
+		t.Fatalf("NewValkeyStore with username failed: %v", err)
+	}
+	defer store.Close()
+
+	// Verify the store is functional by writing and reading a session.
+	sess := &Session{
+		SessionID:    "sess-user",
+		UserID:       "user-user",
+		AccessToken:  "token",
+		IDToken:      "id",
+		RefreshToken: "refresh",
+		ExpiresAt:    time.Now().Add(time.Hour),
+		CreatedAt:    time.Now(),
+	}
+	if err := store.Set(ctx, sess); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+	got, err := store.Get(ctx, sess.SessionID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.SessionID != sess.SessionID {
+		t.Errorf("SessionID mismatch: got %v, want %v", got.SessionID, sess.SessionID)
+	}
+}
+
+func TestNewValkeyClient_WithUsername(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	containerName := fmt.Sprintf("sts-session-%s", sanitizeName(t.Name()))
+	valkeyContainer, err := valkey.Run(ctx, "valkey/valkey:7.2-alpine",
+		testcontainers.CustomizeRequest(testcontainers.GenericContainerRequest{
+			ContainerRequest: testcontainers.ContainerRequest{
+				Name: containerName,
+			},
+		}),
+	)
+	if err != nil {
+		t.Fatalf("Failed to start Valkey container: %v", err)
+	}
+	defer func() {
+		if err := valkeyContainer.Terminate(ctx); err != nil {
+			t.Logf("Failed to terminate container: %v", err)
+		}
+	}()
+
+	host, err := valkeyContainer.Host(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get container host: %v", err)
+	}
+	port, err := valkeyContainer.MappedPort(ctx, "6379/tcp")
+	if err != nil {
+		t.Fatalf("Failed to get container port: %v", err)
+	}
+	addr := host + ":" + port.Port()
+
+	client, err := NewValkeyClient(addr, "default", "", 0)
+	if err != nil {
+		t.Fatalf("NewValkeyClient with username failed: %v", err)
+	}
+	defer client.Close()
+
+	// Verify the client is functional with a simple PING.
+	if err := client.Do(ctx, client.B().Ping().Build()).Error(); err != nil {
+		t.Fatalf("PING failed: %v", err)
+	}
+}

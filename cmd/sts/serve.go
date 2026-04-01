@@ -91,7 +91,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		zap.Bool("tracing", cfg.TracingEnabled))
 
 	// Initialize Valkey client for caching
-	valkeyClient, err := session.NewValkeyClient(cfg.CacheAddr, cfg.CachePassword, cfg.CacheDB)
+	valkeyClient, err := session.NewValkeyClient(cfg.CacheAddr, cfg.CacheUsername, cfg.CachePassword, cfg.CacheDB)
 	if err != nil {
 		return fmt.Errorf("failed to initialize valkey client: %w", err)
 	}
@@ -109,6 +109,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Initialize Session Store
 	sessionStore, err := session.NewValkeyStore(
 		cfg.CacheAddr,
+		cfg.CacheUsername,
 		cfg.CachePassword,
 		cfg.CacheDB,
 		time.Duration(cfg.SessionExpiry)*time.Second,

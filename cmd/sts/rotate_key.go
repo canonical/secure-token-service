@@ -154,7 +154,7 @@ func runRotateKey(cmd *cobra.Command, args []string) error {
 
 	// Invalidate JWKS cache after rotation
 	// Initialize Valkey client for cache invalidation
-	valkeyClient, err := session.NewValkeyClient(cfg.CacheAddr, cfg.CachePassword, cfg.CacheDB)
+	valkeyClient, err := session.NewValkeyClient(cfg.CacheAddr, cfg.CacheUsername, cfg.CachePassword, cfg.CacheDB)
 	if err != nil {
 		log.Printf("Warning: Failed to connect to cache for invalidation: %v", err)
 		log.Println("  Cached JWKS may be stale until TTL expires")

@@ -81,6 +81,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.CacheAddr != "localhost:6379" {
 		t.Errorf("CacheAddr = %s, want localhost:6379", cfg.CacheAddr)
 	}
+	if cfg.CacheUsername != "" {
+		t.Errorf("CacheUsername = %s, want empty string", cfg.CacheUsername)
+	}
 	if cfg.CacheDB != 0 {
 		t.Errorf("CacheDB = %d, want 0", cfg.CacheDB)
 	}
@@ -114,6 +117,7 @@ func TestLoad_CustomValues(t *testing.T) {
 	os.Setenv("JWT_AUDIENCE", "custom-audience")
 	os.Setenv("JWT_EXPIRY", "7200")
 	os.Setenv("CACHE_ADDR", "cache.example.com:6379")
+	os.Setenv("CACHE_USERNAME", "cache-user")
 	os.Setenv("CACHE_DB", "1")
 	os.Setenv("CACHE_PASSWORD", "secret-password")
 	os.Setenv("JWKS_CACHE_TTL", "1200")
@@ -133,6 +137,7 @@ func TestLoad_CustomValues(t *testing.T) {
 		os.Unsetenv("JWT_AUDIENCE")
 		os.Unsetenv("JWT_EXPIRY")
 		os.Unsetenv("CACHE_ADDR")
+		os.Unsetenv("CACHE_USERNAME")
 		os.Unsetenv("CACHE_DB")
 		os.Unsetenv("CACHE_PASSWORD")
 		os.Unsetenv("JWKS_CACHE_TTL")
@@ -169,6 +174,9 @@ func TestLoad_CustomValues(t *testing.T) {
 	}
 	if cfg.CacheAddr != "cache.example.com:6379" {
 		t.Errorf("CacheAddr = %s, want cache.example.com:6379", cfg.CacheAddr)
+	}
+	if cfg.CacheUsername != "cache-user" {
+		t.Errorf("CacheUsername = %s, want cache-user", cfg.CacheUsername)
 	}
 	if cfg.CacheDB != 1 {
 		t.Errorf("CacheDB = %d, want 1", cfg.CacheDB)

@@ -14,6 +14,7 @@ type Config struct {
 
 	// Cache (Redis/Valkey)
 	CacheAddr     string `envconfig:"CACHE_ADDR" default:"localhost:6379"`
+	CacheUsername string `envconfig:"CACHE_USERNAME" default:""`
 	CachePassword string `envconfig:"CACHE_PASSWORD" default:""`
 	CacheDB       int    `envconfig:"CACHE_DB" default:"0"`
 
