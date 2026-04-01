@@ -147,6 +147,7 @@ func setupExtendDeps(ctx context.Context) (*session.ValkeyStore, *oauth2.Config,
 	// Initialize Session Store
 	store, err := session.NewValkeyStore(
 		cfg.CacheAddr,
+		cfg.CacheUsername,
 		cfg.CachePassword,
 		cfg.CacheDB,
 		time.Duration(cfg.SessionExpiry)*time.Second,

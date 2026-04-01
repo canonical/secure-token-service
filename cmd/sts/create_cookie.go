@@ -56,6 +56,7 @@ func runCreateCookie(cmd *cobra.Command, args []string) error {
 	// Initialize Session Store
 	sessionStore, err := session.NewValkeyStore(
 		cfg.CacheAddr,
+		cfg.CacheUsername,
 		cfg.CachePassword,
 		cfg.CacheDB,
 		time.Duration(cfg.SessionExpiry)*time.Second,

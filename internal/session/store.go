@@ -54,9 +54,12 @@ type ValkeyStore struct {
 }
 
 // NewValkeyStore creates a new Valkey-based session store.
-func NewValkeyStore(addr, password string, db int, ttl time.Duration) (*ValkeyStore, error) {
+func NewValkeyStore(addr, username, password string, db int, ttl time.Duration) (*ValkeyStore, error) {
 	opt := valkey.ClientOption{
 		InitAddress: []string{addr},
+	}
+	if username != "" {
+		opt.Username = username
 	}
 	if password != "" {
 		opt.Password = password
@@ -245,9 +248,12 @@ func (s *ValkeyStore) Close() error {
 }
 
 // NewValkeyClient creates a new Valkey client for caching purposes.
-func NewValkeyClient(addr, password string, db int) (valkey.Client, error) {
+func NewValkeyClient(addr, username, password string, db int) (valkey.Client, error) {
 	opt := valkey.ClientOption{
 		InitAddress: []string{addr},
+	}
+	if username != "" {
+		opt.Username = username
 	}
 	if password != "" {
 		opt.Password = password
