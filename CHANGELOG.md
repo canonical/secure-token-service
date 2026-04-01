@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/canonical/secure-token-service/compare/v0.3.0...v0.4.0) (2026-04-01)
+
+
+### Features
+
+* add CACHE_USERNAME config option for Valkey/Redis ([0c6b30e](https://github.com/canonical/secure-token-service/commit/0c6b30e664b985f182a6c3d6d933f9ed31f83b65))
+
 ## [0.3.0](https://github.com/canonical/secure-token-service/compare/v0.2.1...v0.3.0) (2026-03-30)
 
 
