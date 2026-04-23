@@ -358,6 +358,28 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 | `COOKIE_HASH_KEY` | - | 64-byte hex key for HMAC (required) |
 | `COOKIE_BLOCK_KEY` | - | 32-byte hex key for AES (required) |
 
+### Environment File Management
+
+This project uses `.env` files for configuration:
+
+- **`.env.example`**: Template with placeholder values (tracked in git)
+- **`.env.local`**: Local development secrets (git-ignored, do NOT commit)
+- **`.env.secrets`** / **`.env.*.local`**: Alternative patterns for secrets (all git-ignored)
+
+**Workflow**:
+```bash
+# 1. Copy template
+cp .env.example .env.local
+
+# 2. Edit with your values
+nano .env.local
+
+# 3. Docker Compose automatically loads .env.local
+docker-compose up -d
+```
+
+**Security**: Ensure `.env.local` is in `.gitignore` and never commit credentials to version control.
+
 ---
 
 ## Getting Started
@@ -377,17 +399,28 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 
 Docker Compose provides the fastest way to run all services locally.
 
-#### Step 1: Clone and Configure
+#### Step 1: Configure Environment Variables
 
 ```bash
 # Clone the repository
 git clone https://github.com/canonical/secure-token-service
 cd secure-token-service
 
-# Review docker-compose.yml and update OIDC configuration
-# Edit OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, OIDC_PROVIDER_URL
-nano docker-compose.yml
+# Copy the environment template
+cp .env.example .env.local
+
+# Edit .env.local with your OIDC provider credentials
+nano .env.local
 ```
+
+**Important Variables to Update in `.env.local`:**
+- `OIDC_PROVIDER_URL`: Your OIDC provider's discovery URL (e.g., `https://accounts.google.com`)
+- `OIDC_CLIENT_ID`: OAuth2 client ID from your provider
+- `OIDC_CLIENT_SECRET`: OAuth2 client secret from your provider
+- `OIDC_SCOPES`: Comma-separated scopes (default: `openid,profile,email,offline_access`)
+- `OIDC_REDIRECT_URL`: Your application's callback URL
+
+**Security Note**: `.env.local` is git-ignored and contains sensitive credentials. Never commit it to version control.
 
 #### Step 2: Start Services
 
