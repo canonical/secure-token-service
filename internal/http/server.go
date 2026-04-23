@@ -10,13 +10,14 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/canonical/secure-token-service/internal/constants"
-	"github.com/canonical/secure-token-service/internal/observability"
-	"github.com/canonical/secure-token-service/internal/session"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/canonical/secure-token-service/internal/constants"
+	"github.com/canonical/secure-token-service/internal/observability"
+	"github.com/canonical/secure-token-service/internal/session"
 )
 
 // observabilityProvider defines the interface for observability components
@@ -246,15 +247,20 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// 5. Create Session
 	sessionID := uuid.New().String()
 	// Ideally extract sub from idToken for userID
-	userID, err := idToken.GetSubject()
-	if err != nil || userID == "" {
-		userID = "user-" + sessionID
+	var claims struct {
+		Email string `json:"email,omitempty"`
+	}
+
+	err = idToken.Claims(&claims)
+	if err != nil || claims.Email == "" {
+		http.Error(w, "Failed to extract user ID from ID Token", http.StatusInternalServerError)
+		return
 	}
 
 	now := time.Now()
 	sess := &session.Session{
 		SessionID:    sessionID,
-		UserID:       userID,
+		UserID:       claims.Email,
 		AccessToken:  oauth2Token.AccessToken(),
 		IDToken:      idToken.GetOriginalToken(),
 		RefreshToken: oauth2Token.RefreshToken(),
