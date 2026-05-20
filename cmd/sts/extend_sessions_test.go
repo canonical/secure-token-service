@@ -1,3 +1,6 @@
+// Copyright 2026 Canonical Ltd.
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //go:generate mockgen -build_flags=--mod=mod -package main -destination ./mock_store_test.go -source=../../internal/session/store.go
 
 package main

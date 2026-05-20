@@ -1,5 +1,5 @@
-// Copyright 2025 Canonical Ltd
-// SPDX-License-Identifier: AGPL-3.0
+// Copyright 2025 Canonical Ltd.
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package constants defines application-wide constants for the Secure Token Service.
 package constants

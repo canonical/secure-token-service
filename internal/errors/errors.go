@@ -1,5 +1,5 @@
-// Copyright 2025 Canonical Ltd
-// SPDX-License-Identifier: AGPL-3.0
+// Copyright 2025 Canonical Ltd.
+// SPDX-License-Identifier: AGPL-3.0-only
 
 // Package errors provides standardized error handling for the Secure Token Service.
 package errors
