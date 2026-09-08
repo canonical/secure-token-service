@@ -39,7 +39,11 @@ paths:
       parameters:
         - name: return_to
           in: query
-          description: URL to redirect to after successful login (default: "/")
+          description: |
+            URL to redirect to after successful login (default: "/").
+            Must be a path-relative URL (e.g. "/dashboard") or an absolute URL matching
+            the request host or configured allowed return-to hosts.
+            Unsafe or external URLs will be rejected with HTTP 400 Bad Request.
           required: false
           schema:
             type: string
@@ -57,6 +61,13 @@ paths:
               schema:
                 type: string
                 example: "oauth_state=...; HttpOnly; Secure; SameSite=Lax"
+        '400':
+          description: Bad request (invalid return_to parameter)
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Invalid return_to parameter"
 
   /auth/callback:
     get:
@@ -94,7 +105,9 @@ paths:
             type: string
       responses:
         '302':
-          description: Successful authentication, redirect to return_to URL
+          description: |
+            Successful authentication, redirect to return_to URL.
+            If return_to in state is missing or invalid, safely falls back to "/".
           headers:
             Location:
               schema:

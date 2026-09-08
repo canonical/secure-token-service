@@ -102,6 +102,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.ServiceName != "secure-token-service" {
 		t.Errorf("ServiceName = %s, want secure-token-service", cfg.ServiceName)
 	}
+	if len(cfg.AllowedReturnToHosts) != 0 {
+		t.Errorf("AllowedReturnToHosts = %v, want empty slice", cfg.AllowedReturnToHosts)
+	}
 }
 
 func TestLoad_CustomValues(t *testing.T) {
@@ -126,11 +129,13 @@ func TestLoad_CustomValues(t *testing.T) {
 	os.Setenv("LOG_FORMAT", "text")
 	os.Setenv("METRICS_ENABLED", "false")
 	os.Setenv("TRACING_ENABLED", "false")
+	os.Setenv("ALLOWED_RETURN_TO_HOSTS", "app1.example.com,app2.example.com")
 	defer func() {
 		os.Unsetenv("OIDC_PROVIDER_URL")
 		os.Unsetenv("OIDC_CLIENT_ID")
 		os.Unsetenv("OIDC_CLIENT_SECRET")
 		os.Unsetenv("OIDC_REDIRECT_URL")
+		os.Unsetenv("ALLOWED_RETURN_TO_HOSTS")
 		os.Unsetenv("HTTP_PORT")
 		os.Unsetenv("GRPC_PORT")
 		os.Unsetenv("JWT_ISSUER")
@@ -154,6 +159,9 @@ func TestLoad_CustomValues(t *testing.T) {
 	}
 
 	// Verify custom values
+	if len(cfg.AllowedReturnToHosts) != 2 || cfg.AllowedReturnToHosts[0] != "app1.example.com" || cfg.AllowedReturnToHosts[1] != "app2.example.com" {
+		t.Errorf("AllowedReturnToHosts = %v, want [app1.example.com app2.example.com]", cfg.AllowedReturnToHosts)
+	}
 	if cfg.HTTPPort != "9000" {
 		t.Errorf("HTTPPort = %s, want 9000", cfg.HTTPPort)
 	}
