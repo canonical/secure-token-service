@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,10 @@ import (
 	"github.com/canonical/secure-token-service/internal/constants"
 	"github.com/chmike/securecookie"
 )
+
+var ErrKeyTooShort = errors.New("cookie key is too short: minimum length is 32 bytes")
+
+const MinKeyLength = 32
 
 // CookieManager handles secure cookie encoding and decoding.
 type CookieManager struct {
@@ -26,47 +31,53 @@ type CookieManager struct {
 // NewCookieManager creates a new CookieManager with the given keys.
 // hashKey is required, used to authenticate the cookie value using HMAC.
 // Note: chmike/securecookie uses a single key (combines both hash and encryption).
-func NewCookieManager(hashKey []byte) *CookieManager {
-	// chmike/securecookie requires a 32-byte key for AES-128 + HMAC-SHA256
-	// We'll use the hashKey as the primary key
+func NewCookieManager(hashKey []byte) (*CookieManager, error) {
+	if len(hashKey) < MinKeyLength {
+		return nil, fmt.Errorf("%w (got %d bytes, minimum required is %d)", ErrKeyTooShort, len(hashKey), MinKeyLength)
+	}
+
 	key := hashKey
-	if len(key) < 32 {
-		// If hashKey is too short, we need to derive a proper key
-		// For compatibility, we'll pad or use the first 32 bytes
-		derivedKey := make([]byte, 32)
-		copy(derivedKey, hashKey)
-		key = derivedKey
-	} else if len(key) > 32 {
+	if len(key) > 32 {
 		key = key[:32]
 	}
 
 	// Create cookie objects for each cookie type
-	sessionCk := securecookie.MustNew("session_id", key, securecookie.Params{
+	sessionCk, err := securecookie.New("session_id", key, securecookie.Params{
 		Path:     "/",
 		MaxAge:   constants.CookieMaxAge,
 		HTTPOnly: true,
 		Secure:   false, // Will be set dynamically based on request
 	})
-	oauthStateCk := securecookie.MustNew("oauth_state", key, securecookie.Params{
-		Path:     "/",
-		MaxAge:   constants.CookieMaxAge,
-		HTTPOnly: true,
-		Secure:   false, // Will be set dynamically based on request
-	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session cookie: %w", err)
+	}
 
-	oauthNonceCk := securecookie.MustNew("oauth_nonce", key, securecookie.Params{
+	oauthStateCk, err := securecookie.New("oauth_state", key, securecookie.Params{
 		Path:     "/",
 		MaxAge:   constants.CookieMaxAge,
 		HTTPOnly: true,
 		Secure:   false, // Will be set dynamically based on request
 	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create oauth state cookie: %w", err)
+	}
+
+	oauthNonceCk, err := securecookie.New("oauth_nonce", key, securecookie.Params{
+		Path:     "/",
+		MaxAge:   constants.CookieMaxAge,
+		HTTPOnly: true,
+		Secure:   false, // Will be set dynamically based on request
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create oauth nonce cookie: %w", err)
+	}
 
 	return &CookieManager{
 		key:          key,
 		sessionCk:    sessionCk,
 		oauthStateCk: oauthStateCk,
 		oauthNonceCk: oauthNonceCk,
-	}
+	}, nil
 }
 
 // Encode encodes a cookie name and value using securecookie.

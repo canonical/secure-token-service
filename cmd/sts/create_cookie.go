@@ -67,9 +67,12 @@ func runCreateCookie(cmd *cobra.Command, args []string) error {
 	defer sessionStore.Close()
 
 	// Initialize Cookie Manager
-	cookieManager := cookie.NewCookieManager(
+	cookieManager, err := cookie.NewCookieManager(
 		[]byte(cfg.CookieHashKey),
 	)
+	if err != nil {
+		return fmt.Errorf("failed to initialize cookie manager: %w", err)
+	}
 
 	// Generate Session ID if not provided
 	if sessionID == "" {

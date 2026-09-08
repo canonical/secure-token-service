@@ -5,6 +5,7 @@ package cookie_test
 
 import (
 	"crypto/rand"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,22 +14,47 @@ import (
 	"github.com/chmike/securecookie"
 )
 
-func TestNewCookieManager_KeyDerivation(t *testing.T) {
+func TestNewCookieManager_KeyValidation(t *testing.T) {
 	tests := []struct {
-		name   string
-		keyLen int
+		name    string
+		keyLen  int
+		wantErr bool
 	}{
-		{name: "short key (16 bytes)", keyLen: 16},
-		{name: "exact key (32 bytes)", keyLen: 32},
-		{name: "long key (64 bytes)", keyLen: 64},
+		{name: "empty key (0 bytes)", keyLen: 0, wantErr: true},
+		{name: "1 byte key", keyLen: 1, wantErr: true},
+		{name: "short key (16 bytes)", keyLen: 16, wantErr: true},
+		{name: "31 bytes key", keyLen: 31, wantErr: true},
+		{name: "exact key (32 bytes)", keyLen: 32, wantErr: false},
+		{name: "long key (64 bytes)", keyLen: 64, wantErr: false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			key := make([]byte, tc.keyLen)
-			rand.Read(key)
+			if tc.keyLen > 0 {
+				_, err := rand.Read(key)
+				if err != nil {
+					t.Fatalf("rand.Read failed: %v", err)
+				}
+			}
 
-			cm := cookie.NewCookieManager(key)
+			cm, err := cookie.NewCookieManager(key)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				if !errors.Is(err, cookie.ErrKeyTooShort) {
+					t.Fatalf("expected ErrKeyTooShort, got %v", err)
+				}
+				if cm != nil {
+					t.Fatal("expected nil CookieManager on error")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if cm == nil {
 				t.Fatal("NewCookieManager returned nil")
 			}
@@ -50,7 +76,10 @@ func TestNewCookieManager_KeyDerivation(t *testing.T) {
 
 func TestCookieManager_EncodeDecode(t *testing.T) {
 	hashKey := securecookie.MustGenerateRandomKey()
-	cm := cookie.NewCookieManager(hashKey)
+	cm, err := cookie.NewCookieManager(hashKey)
+	if err != nil {
+		t.Fatalf("NewCookieManager failed: %v", err)
+	}
 
 	tests := []struct {
 		name       string
@@ -85,7 +114,10 @@ func TestCookieManager_EncodeDecode(t *testing.T) {
 
 func TestCookieManager_DecodeInvalid(t *testing.T) {
 	hashKey := securecookie.MustGenerateRandomKey()
-	cm := cookie.NewCookieManager(hashKey)
+	cm, err := cookie.NewCookieManager(hashKey)
+	if err != nil {
+		t.Fatalf("NewCookieManager failed: %v", err)
+	}
 
 	tests := []struct {
 		name       string
@@ -108,10 +140,16 @@ func TestCookieManager_DecodeInvalid(t *testing.T) {
 
 func TestCookieManager_WrongKey(t *testing.T) {
 	hashKey1 := securecookie.MustGenerateRandomKey()
-	cm1 := cookie.NewCookieManager(hashKey1)
+	cm1, err := cookie.NewCookieManager(hashKey1)
+	if err != nil {
+		t.Fatalf("NewCookieManager failed: %v", err)
+	}
 
 	hashKey2 := securecookie.MustGenerateRandomKey()
-	cm2 := cookie.NewCookieManager(hashKey2)
+	cm2, err := cookie.NewCookieManager(hashKey2)
+	if err != nil {
+		t.Fatalf("NewCookieManager failed: %v", err)
+	}
 
 	encoded, err := cm1.Encode("session_id", "secret-data")
 	if err != nil {
@@ -126,7 +164,10 @@ func TestCookieManager_WrongKey(t *testing.T) {
 
 func TestCookieManager_OIDCState(t *testing.T) {
 	hashKey := securecookie.MustGenerateRandomKey()
-	cm := cookie.NewCookieManager(hashKey)
+	cm, err := cookie.NewCookieManager(hashKey)
+	if err != nil {
+		t.Fatalf("NewCookieManager failed: %v", err)
+	}
 
 	tests := []struct {
 		name     string
@@ -193,11 +234,14 @@ func TestCookieManager_OIDCState(t *testing.T) {
 
 func TestCookieManager_GetOIDCState_NoCookie(t *testing.T) {
 	hashKey := securecookie.MustGenerateRandomKey()
-	cm := cookie.NewCookieManager(hashKey)
+	cm, err := cookie.NewCookieManager(hashKey)
+	if err != nil {
+		t.Fatalf("NewCookieManager failed: %v", err)
+	}
 
 	r := httptest.NewRequest("GET", "/callback", nil)
 
-	_, err := cm.GetOIDCState(r)
+	_, err = cm.GetOIDCState(r)
 	if err == nil {
 		t.Error("Expected error when no state cookie present, got nil")
 	}
@@ -205,7 +249,10 @@ func TestCookieManager_GetOIDCState_NoCookie(t *testing.T) {
 
 func TestCookieManager_OIDCNonce(t *testing.T) {
 	hashKey := securecookie.MustGenerateRandomKey()
-	cm := cookie.NewCookieManager(hashKey)
+	cm, err := cookie.NewCookieManager(hashKey)
+	if err != nil {
+		t.Fatalf("NewCookieManager failed: %v", err)
+	}
 
 	tests := []struct {
 		name string
@@ -267,11 +314,14 @@ func TestCookieManager_OIDCNonce(t *testing.T) {
 
 func TestCookieManager_GetOIDCNonce_NoCookie(t *testing.T) {
 	hashKey := securecookie.MustGenerateRandomKey()
-	cm := cookie.NewCookieManager(hashKey)
+	cm, err := cookie.NewCookieManager(hashKey)
+	if err != nil {
+		t.Fatalf("NewCookieManager failed: %v", err)
+	}
 
 	r := httptest.NewRequest("GET", "/callback", nil)
 
-	_, err := cm.GetOIDCNonce(r)
+	_, err = cm.GetOIDCNonce(r)
 	if err == nil {
 		t.Error("Expected error when no nonce cookie present, got nil")
 	}
@@ -279,7 +329,10 @@ func TestCookieManager_GetOIDCNonce_NoCookie(t *testing.T) {
 
 func TestCookieManager_SecureFlag(t *testing.T) {
 	hashKey := securecookie.MustGenerateRandomKey()
-	cm := cookie.NewCookieManager(hashKey)
+	cm, err := cookie.NewCookieManager(hashKey)
+	if err != nil {
+		t.Fatalf("NewCookieManager failed: %v", err)
+	}
 
 	tests := []struct {
 		name           string
