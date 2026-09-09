@@ -355,6 +355,7 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 | `OIDC_CLIENT_ID` | - | OAuth2 client ID |
 | `OIDC_CLIENT_SECRET` | - | OAuth2 client secret |
 | `OIDC_REDIRECT_URL` | `http://localhost:8080/auth/callback` | OAuth2 redirect URI |
+| `ALLOWED_RETURN_TO_HOSTS` | - | Comma-separated list of additional trusted hosts allowed for `return_to` redirection |
 | `COOKIE_HASH_KEY` | - | 64-byte hex key for HMAC (required) |
 | `COOKIE_BLOCK_KEY` | - | 32-byte hex key for AES (required) |
 
@@ -1146,6 +1147,7 @@ Returns the JSON Web Key Set containing all public keys (active + retired) for J
 3. **Replay Attacks**: Short-lived JWTs (1 hour default), session revocation support
 4. **Key Compromise**: Key rotation support, retired keys for verification only
 5. **XSS Attacks**: HttpOnly cookies prevent JavaScript access to session tokens
+6. **Open Redirects**: Mitigated by strict `return_to` parameter validation allowing only path-relative URLs, same-origin targets, and explicitly configured `ALLOWED_RETURN_TO_HOSTS`. Unsafe targets return HTTP 400 on login, and fallback safely to `/` on callback.
 
 ### Best Practices
 

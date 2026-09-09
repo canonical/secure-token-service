@@ -8,7 +8,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/go-chi/chi/v5"
@@ -32,6 +35,16 @@ type observabilityProvider interface {
 	GetTracerProvider() interface{ Tracer() interface{} }
 }
 
+// ServerOption is a functional option for configuring a Server.
+type ServerOption func(*Server)
+
+// WithAllowedHosts sets the allowlist of hosts permitted in absolute return_to redirect URLs.
+func WithAllowedHosts(hosts []string) ServerOption {
+	return func(s *Server) {
+		s.allowedHosts = append(s.allowedHosts, hosts...)
+	}
+}
+
 // Server handles HTTP endpoints for OIDC flow and JWKS.
 type Server struct {
 	sessionStore  session.Store
@@ -39,6 +52,7 @@ type Server struct {
 	cookieManager AuthCookieManager
 	oidcProvider  OIDCProvider
 	observability *observability.Observability
+	allowedHosts  []string
 	server        *http.Server
 }
 
@@ -55,15 +69,19 @@ func (s *Server) logger(ctx context.Context) *zap.Logger {
 	return logger.Logger
 }
 
-// NewServer creates a new HTTP server with optional observability.
-func NewServer(store session.Store, km KeyManager, cm AuthCookieManager, provider OIDCProvider, obs *observability.Observability) *Server {
-	return &Server{
+// NewServer creates a new HTTP server with optional observability and configuration options.
+func NewServer(store session.Store, km KeyManager, cm AuthCookieManager, provider OIDCProvider, obs *observability.Observability, opts ...ServerOption) *Server {
+	s := &Server{
 		sessionStore:  store,
 		keyManager:    km,
 		cookieManager: cm,
 		oidcProvider:  provider,
 		observability: obs,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Router creates and returns a chi router with all routes configured.
@@ -148,12 +166,99 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
+// isValidReturnTo validates that returnTo is a safe redirect target to prevent open redirect vulnerabilities.
+func (s *Server) isValidReturnTo(returnTo string, reqHost string) bool {
+	// Empty string defaults to "/" (valid).
+	if returnTo == "" {
+		return true
+	}
+
+	// Reject control characters (\r, \n, null bytes, CRLF injection).
+	for _, r := range returnTo {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+
+	// Reject backslash evasions (starting with "/\", "\\", "/\\", or containing "\").
+	if strings.HasPrefix(returnTo, "/\\") || strings.Contains(returnTo, "\\") {
+		return false
+	}
+
+	// Reject scheme-relative redirects (starting with "//", "///", etc.).
+	if strings.HasPrefix(returnTo, "//") {
+		return false
+	}
+
+	// Parse URL with url.Parse(returnTo).
+	u, err := url.Parse(returnTo)
+	if err != nil {
+		return false
+	}
+
+	// If relative path (empty scheme and host): must start with "/" (path-relative),
+	// and must not have '/' or '\' in its second position.
+	if u.Scheme == "" {
+		if u.Host != "" {
+			return false
+		}
+		if len(returnTo) > 1 && (returnTo[1] == '/' || returnTo[1] == '\\') {
+			return false
+		}
+		return strings.HasPrefix(returnTo, "/") && !strings.HasPrefix(returnTo, "//") && !strings.HasPrefix(returnTo, "/\\")
+	}
+
+	// If absolute URL with http/https scheme: allowed if host matches reqHost or configured allowed hosts.
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		// Reject dangerous schemes (javascript:, data:, vbscript:, etc.).
+		return false
+	}
+
+	if u.User != nil {
+		return false
+	}
+
+	if u.Host == "" {
+		return false
+	}
+
+	uHostname := u.Hostname()
+
+	if reqHost != "" && matchHost(u.Host, uHostname, reqHost) {
+		return true
+	}
+
+	if s != nil {
+		for _, allowed := range s.allowedHosts {
+			trimmed := strings.TrimSpace(allowed)
+			if trimmed != "" && matchHost(u.Host, uHostname, trimmed) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func matchHost(targetHost, targetHostname, allowed string) bool {
+	if strings.Contains(allowed, ":") {
+		return strings.EqualFold(targetHost, allowed)
+	}
+	return strings.EqualFold(targetHostname, allowed) || strings.EqualFold(targetHost, allowed)
+}
+
 // handleLogin initiates the OIDC login flow.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// 1. Get return_to URL
 	returnTo := r.URL.Query().Get("return_to")
 	if returnTo == "" {
 		returnTo = "/"
+	}
+	if !s.isValidReturnTo(returnTo, r.Host) {
+		s.logger(r.Context()).Warn("invalid return_to parameter", zap.String("return_to", returnTo))
+		http.Error(w, "Invalid return_to parameter", http.StatusBadRequest)
+		return
 	}
 
 	// 2. Generate and store state
@@ -292,7 +397,15 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// 7. Redirect to return_to
-	http.Redirect(w, r, stateData["return_to"], http.StatusFound)
+	returnTo := stateData["return_to"]
+	if returnTo == "" || !s.isValidReturnTo(returnTo, r.Host) {
+		if returnTo != "" {
+			s.logger(r.Context()).Warn("invalid return_to parameter; falling back to /", zap.String("return_to", returnTo))
+		}
+		returnTo = "/"
+	}
+
+	http.Redirect(w, r, returnTo, http.StatusFound)
 }
 
 // Helpers removed - logic moved to CookieManager

@@ -37,11 +37,12 @@ type Config struct {
 	CookieHashKey  string `envconfig:"COOKIE_HASH_KEY"`  // 64 bytes
 
 	// OIDC Configuration
-	OIDCProviderURL  string   `envconfig:"OIDC_PROVIDER_URL" required:"true"`
-	OIDCClientID     string   `envconfig:"OIDC_CLIENT_ID" required:"true"`
-	OIDCClientSecret string   `envconfig:"OIDC_CLIENT_SECRET" required:"true"`
-	OIDCRedirectURL  string   `envconfig:"OIDC_REDIRECT_URL" required:"true"`
-	OIDCScopes       []string `envconfig:"OIDC_SCOPES" default:"openid,profile,email,offline_access"`
+	OIDCProviderURL      string   `envconfig:"OIDC_PROVIDER_URL" required:"true"`
+	OIDCClientID         string   `envconfig:"OIDC_CLIENT_ID" required:"true"`
+	OIDCClientSecret     string   `envconfig:"OIDC_CLIENT_SECRET" required:"true"`
+	OIDCRedirectURL      string   `envconfig:"OIDC_REDIRECT_URL" required:"true"`
+	OIDCScopes           []string `envconfig:"OIDC_SCOPES" default:"openid,profile,email,offline_access"`
+	AllowedReturnToHosts []string `envconfig:"ALLOWED_RETURN_TO_HOSTS" default:""`
 
 	// JWKS Caching
 	JWKSCacheTTL int `envconfig:"JWKS_CACHE_TTL" default:"600"` // seconds (10 minutes)

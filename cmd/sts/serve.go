@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -143,9 +144,22 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	obs.Logger.Info("OIDC provider initialized")
 
+	// Build allowed hosts for return_to redirection
+	allowedHosts := append([]string{}, cfg.AllowedReturnToHosts...)
+	if redirectURL, err := url.Parse(cfg.OIDCRedirectURL); err == nil && redirectURL.Host != "" {
+		allowedHosts = append(allowedHosts, redirectURL.Host)
+	}
+
 	// Start HTTP server in goroutine with observability
 	oidcProvider := httpserver.NewOIDCProvider(provider, oauth2Config)
-	httpSrvWithObs := httpserver.NewServer(sessionStore, keyManager, cookieManager, oidcProvider, obs)
+	httpSrvWithObs := httpserver.NewServer(
+		sessionStore,
+		keyManager,
+		cookieManager,
+		oidcProvider,
+		obs,
+		httpserver.WithAllowedHosts(allowedHosts),
+	)
 	go func() {
 		if err := httpSrvWithObs.StartWithMiddleware(cfg.HTTPPort); err != nil && err != http.ErrServerClosed {
 			obs.Logger.Error("HTTP server failed", zap.Error(err))
