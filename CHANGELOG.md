@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0](https://github.com/canonical/secure-token-service/compare/v0.4.0...v0.5.0) (2026-09-09)
+
+
+### Features
+
+* **openspec:** configure openspec and add opencode/openspec workflows ([a0c1fdc](https://github.com/canonical/secure-token-service/commit/a0c1fdc2806c4d289d47f7345b11d64a8d93759a))
+* **openspec:** configure openspec and add opencode/openspec workflows ([#28](https://github.com/canonical/secure-token-service/issues/28)) ([bd6d8ea](https://github.com/canonical/secure-token-service/commit/bd6d8ea4f7a9ea2af79a237cec39d5283ec761d4))
+
+
+### Bug Fixes
+
+* **cookie:** error out if cookie key is too short ([#7](https://github.com/canonical/secure-token-service/issues/7)) ([6ff719c](https://github.com/canonical/secure-token-service/commit/6ff719ccf09c4870e09d246dbb9810f64034feec))
+* **http:** verify return_to parameter to prevent open redirect ([#6](https://github.com/canonical/secure-token-service/issues/6)) ([4c1dc86](https://github.com/canonical/secure-token-service/commit/4c1dc86f61481407372c7ca729d2e280940ff7c7))
+
 ## [0.4.0](https://github.com/canonical/secure-token-service/compare/v0.3.0...v0.4.0) (2026-04-01)
 
 
