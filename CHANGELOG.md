@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/canonical/secure-token-service/compare/v0.5.0...v0.6.0) (2026-09-10)
+
+
+### Features
+
+* **openspec:** add openspec-detect-drift agent skill ([0ff8c46](https://github.com/canonical/secure-token-service/commit/0ff8c462eb005379dddfe44565f99b9d62993844))
+
 ## [0.5.0](https://github.com/canonical/secure-token-service/compare/v0.4.0...v0.5.0) (2026-09-09)
 
 
