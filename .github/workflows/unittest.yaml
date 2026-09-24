@@ -12,7 +12,10 @@ jobs:
       - uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6
         with:
           go-version: '1.25'
-  
+
+      - name: Run vulnerability check
+        run: make govulncheck
+
       - name: Install Podman
         uses: redhat-actions/podman-install@main
 
