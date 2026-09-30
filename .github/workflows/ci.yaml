@@ -20,26 +20,55 @@ jobs:
   unit-test:
     uses: ./.github/workflows/unittest.yaml
   build:
-    uses: canonical/identity-team/.github/workflows/_rock-build.yaml@6b27807be4ec7c25045d52ef09ac780d684f65a2 # v1.10.0
+    needs: [ unit-test ]
+    uses: canonical/identity-team/.github/workflows/_rock-build.yaml@fc85af7448538c473be450dc2c8ec5d158ea0d15 # v1.17.0
     with:
       structure-tests-enabled: true
-  gh-publish:
+  gh-publish-branch:
     permissions:
       packages: write
       contents: read
-    if: ${{ (github.ref == 'refs/heads/main') || (github.ref_type == 'tag') }}
+    if: ${{ github.ref == 'refs/heads/main' }}
     needs: [ build, unit-test ]
-    uses: canonical/identity-team/.github/workflows/_rock-gh-publish.yaml@6b27807be4ec7c25045d52ef09ac780d684f65a2 # v1.10.0
+    uses: canonical/identity-team/.github/workflows/_rock-gh-publish.yaml@fc85af7448538c473be450dc2c8ec5d158ea0d15 # v1.17.0
     with:
       rock: ${{ needs.build.outputs.rock }}
+
+  gh-publish-candidate:
+    permissions:
+      packages: write
+      contents: read
+    if: ${{ github.ref_type == 'tag' }}
+    needs: [ build, unit-test ]
+    uses: canonical/identity-team/.github/workflows/_rock-gh-publish.yaml@fc85af7448538c473be450dc2c8ec5d158ea0d15 # v1.17.0
+    with:
+      rock: ${{ needs.build.outputs.rock }}
+      candidate: true
+
   scan:
     permissions:
       packages: read
       contents: read
       security-events: write
       actions: read
-    if: ${{ (github.ref == 'refs/heads/main') || (github.ref_type == 'tag') }}
-    needs: gh-publish
-    uses: canonical/identity-team/.github/workflows/_rock-scan.yaml@6b27807be4ec7c25045d52ef09ac780d684f65a2 # v1.10.0
+    if: ${{ !cancelled() && (needs.gh-publish-branch.result == 'success' || needs.gh-publish-candidate.result == 'success') }}
+    needs: [ gh-publish-branch, gh-publish-candidate ]
+    uses: canonical/identity-team/.github/workflows/_rock-scan.yaml@fc85af7448538c473be450dc2c8ec5d158ea0d15 # v1.17.0
     with:
-      image: ${{ needs.gh-publish.outputs.image }}
+      image: ${{ needs.gh-publish-candidate.outputs.image || needs.gh-publish-branch.outputs.image }}
+      exit-code: '1'
+      severity: 'HIGH,CRITICAL'
+      ignore-unfixed: true
+      trivyignores: '.trivyignore'
+
+  promote:
+    permissions:
+      packages: write
+      contents: write
+    if: ${{ github.ref_type == 'tag' }}
+    needs: [ gh-publish-candidate, scan ]
+    uses: canonical/identity-team/.github/workflows/_rock-promote.yaml@fc85af7448538c473be450dc2c8ec5d158ea0d15 # v1.17.0
+    with:
+      candidate-image: ${{ needs.gh-publish-candidate.outputs.image }}
+      release-tag: ${{ github.ref_name }}
+      promote-stable: true
