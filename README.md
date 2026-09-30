@@ -387,7 +387,7 @@ docker-compose up -d
 
 ### Prerequisites
 
-- **Go 1.23+** (for local development)
+- **Go 1.26+** (for local development)
 - **Docker** & **Docker Compose** (for containerized deployment)
 - **Kubernetes cluster** (for Skaffold deployment)
 - **Skaffold** (optional, for Kubernetes development)
@@ -1233,7 +1233,7 @@ Integration tests use `testcontainers-go` for PostgreSQL and Valkey:
 
 **Prerequisites**:
 - Docker or Podman running and accessible
-- Go 1.23+
+- Go 1.26+
 
 **For Podman users**, set the `DOCKER_HOST` environment variable:
 
@@ -1340,7 +1340,7 @@ The project includes comprehensive integration tests that use testcontainers to 
 #### Prerequisites
 
 - **Docker or Podman**: Tests require a container runtime
-- **Go 1.25+**: Latest Go version
+- **Go 1.26+**: Latest Go version
 - Sufficient resources (2GB+ RAM recommended)
 
 #### Podman Configuration
