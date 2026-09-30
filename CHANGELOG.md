@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/canonical/secure-token-service/compare/v0.6.0...v0.7.0) (2026-09-30)
+
+
+### Features
+
+* **ci:** shift-left vulnerability check & release quarantine gate ([e55ad87](https://github.com/canonical/secure-token-service/commit/e55ad8714496695a102a9860642561a2a2024bbf))
+* **ci:** shift-left vulnerability check & release quarantine gate ([#34](https://github.com/canonical/secure-token-service/issues/34)) ([c90af84](https://github.com/canonical/secure-token-service/commit/c90af8495fcfb87c5205f9128e8c092a7e028ec0))
+
 ## [0.6.0](https://github.com/canonical/secure-token-service/compare/v0.5.0...v0.6.0) (2026-09-10)
 
 
