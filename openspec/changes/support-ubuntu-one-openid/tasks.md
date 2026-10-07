@@ -7,9 +7,9 @@
 
 ## 2. Standardized Cookie Generation
 
-- [ ] 2.1 Refactor `CookieManager` in `internal/cookie/cookie.go` and update `internal/http/interfaces.go` to add `SetSessionCookie(w, r, sessionID, expiresAt)` and `ClearSessionCookie(w, r)`. Unit test: verify attributes `HttpOnly: true`, `SameSite: Lax`, and correct `Path: "/"` in `cookie_test.go`.
-- [ ] 2.2 Implement dynamic `Secure` cookie flag evaluation based on `r.TLS != nil` or `X-Forwarded-Proto == "https"`. Unit test: verify `Secure` is present on TLS/proxy requests and omitted on plain HTTP in `cookie_test.go`.
-- [ ] 2.3 Generalize state cookie management with `SetAuthState` / `GetAuthState` to store `provider`, `return_to`, and state token securely. Unit test: roundtrip state encryption and decoding in `cookie_test.go`.
+- [x] 2.1 Refactor `CookieManager` in `internal/cookie/cookie.go` and update `internal/http/interfaces.go` to add `SetSessionCookie(w, r, sessionID, expiresAt)` and `ClearSessionCookie(w, r)`. Unit test: verify attributes `HttpOnly: true`, `SameSite: Lax`, and correct `Path: "/"` in `cookie_test.go`.
+- [x] 2.2 Implement dynamic `Secure` cookie flag evaluation based on `r.TLS != nil` or `X-Forwarded-Proto == "https"`. Unit test: verify `Secure` is present on TLS/proxy requests and omitted on plain HTTP in `cookie_test.go`.
+- [x] 2.3 Generalize state cookie management with `SetAuthState` / `GetAuthState` to store `provider`, `return_to`, and state token securely. Unit test: roundtrip state encryption and decoding in `cookie_test.go`.
 
 ## 3. Ubuntu One OpenID Provider Client
 
