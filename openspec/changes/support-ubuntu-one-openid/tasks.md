@@ -13,9 +13,9 @@
 
 ## 3. Ubuntu One OpenID Provider Client
 
-- [ ] 3.1 Implement OpenID 2.0 URL generator for Ubuntu One in `internal/auth/openid/ubuntuone.go` requesting Simple Registration (SREG 1.1) and Attribute Exchange (AX 1.0) schemas for email, nickname, and fullname. Unit test: verify query parameters, SREG, and AX schemas.
-- [ ] 3.2 Implement OpenID 2.0 direct verification (`check_authentication`) via HTTP POST in `internal/auth/openid/ubuntuone.go`. Unit test: verify handling of `is_valid:true`, `is_valid:false`, cancellation, and error responses using `httptest.Server`.
-- [ ] 3.3 Implement OpenID claims extraction and normalization in `internal/auth/openid/ubuntuone.go`, extracting attributes from SREG 1.1 and AX 1.0 extensions, producing a normalized map and selecting `UserID` via `email` -> `nickname` -> `claimed_id` fallback. Unit test: test claims extraction under full, partial, and minimal attribute responses.
+- [x] 3.1 Implement OpenID 2.0 URL generator for Ubuntu One in `internal/auth/openid/ubuntuone.go` requesting Simple Registration (SREG 1.1) and Attribute Exchange (AX 1.0) schemas for email, nickname, and fullname. Unit test: verify query parameters, SREG, and AX schemas.
+- [x] 3.2 Implement OpenID 2.0 direct verification (`check_authentication`) via HTTP POST in `internal/auth/openid/ubuntuone.go`. Unit test: verify handling of `is_valid:true`, `is_valid:false`, cancellation, and error responses using `httptest.Server`.
+- [x] 3.3 Implement OpenID claims extraction and normalization in `internal/auth/openid/ubuntuone.go`, extracting attributes from SREG 1.1 and AX 1.0 extensions, producing a normalized map and selecting `UserID` via `email` -> `nickname` -> `claimed_id` fallback. Unit test: test claims extraction under full, partial, and minimal attribute responses.
 
 ## 4. HTTP Presentation & Presentation Routing
 
