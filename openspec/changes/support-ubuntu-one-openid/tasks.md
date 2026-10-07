@@ -29,9 +29,10 @@
 
 ## 6. Documentation & Rollout
 
-- [ ] 6.1 Update OpenAPI specification in `docs/api/openapi.yaml` to include the `provider` query parameter on `/auth/login` and document standardized cookie attributes.
-- [ ] 6.2 Update `.env.example` and `README.md` with configuration instructions for Ubuntu One OpenID.
-- [ ] 6.3 Run end-to-end integration verification with Docker Compose validating both OIDC and Ubuntu One flows.
+- [x] 6.1 Update OpenAPI specification in `docs/api/openapi.yaml` to include the `provider` query parameter on `/auth/login` and document standardized cookie attributes.
+- [x] 6.2 Update `.env.example` and `README.md` with configuration instructions for Ubuntu One OpenID.
+- [x] 6.3 Run end-to-end integration verification with Docker Compose validating both OIDC and Ubuntu One flows.
+
 
 ## Verification Suite
 
