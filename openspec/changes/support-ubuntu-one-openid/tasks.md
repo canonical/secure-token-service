@@ -2,8 +2,8 @@
 
 ## 1. Configuration & Domain Models
 
-- [ ] 1.1 Add Ubuntu One OpenID configuration fields (`UBUNTU_ONE_OPENID_URL`, `UBUNTU_ONE_REALM`, `DEFAULT_AUTH_PROVIDER`) to `internal/config/config.go`. Unit test: verify environment variable parsing and defaults in `config_test.go`.
-- [ ] 1.2 Extend `session.Session` struct in `internal/session/store.go` with `Provider string` and `Claims map[string]any` fields. Unit test: verify JSON serialization and deserialization in Valkey session store tests.
+- [x] 1.1 Add Ubuntu One OpenID configuration fields (`UBUNTU_ONE_OPENID_URL`, `UBUNTU_ONE_REALM`, `DEFAULT_AUTH_PROVIDER`) to `internal/config/config.go`. Unit test: verify environment variable parsing and defaults in `config_test.go`.
+- [x] 1.2 Extend `session.Session` struct in `internal/session/store.go` with `Provider string` and `Claims map[string]any` fields. Unit test: verify JSON serialization and deserialization in Valkey session store tests.
 
 ## 2. Standardized Cookie Generation
 

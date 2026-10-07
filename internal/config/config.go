@@ -44,6 +44,11 @@ type Config struct {
 	OIDCScopes           []string `envconfig:"OIDC_SCOPES" default:"openid,profile,email,offline_access"`
 	AllowedReturnToHosts []string `envconfig:"ALLOWED_RETURN_TO_HOSTS" default:""`
 
+	// Ubuntu One OpenID Configuration
+	UbuntuOneOpenIDURL  string `envconfig:"UBUNTU_ONE_OPENID_URL" default:"https://login.ubuntu.com/+openid"`
+	UbuntuOneRealm      string `envconfig:"UBUNTU_ONE_REALM" default:""`
+	DefaultAuthProvider string `envconfig:"DEFAULT_AUTH_PROVIDER" default:"oidc"`
+
 	// JWKS Caching
 	JWKSCacheTTL int `envconfig:"JWKS_CACHE_TTL" default:"600"` // seconds (10 minutes)
 

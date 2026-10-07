@@ -19,8 +19,10 @@ type Session struct {
 	AccessToken  string    `json:"access_token"`  // Upstream Access Token (encrypted)
 	IDToken      string    `json:"id_token"`      // Upstream ID Token (encrypted)
 	RefreshToken string    `json:"refresh_token"` // Upstream Refresh Token (encrypted)
-	ExpiresAt    time.Time `json:"expires_at"`
-	CreatedAt    time.Time `json:"created_at"`
+	ExpiresAt    time.Time              `json:"expires_at"`
+	CreatedAt    time.Time              `json:"created_at"`
+	Provider     string                 `json:"provider,omitempty"`
+	Claims       map[string]interface{} `json:"claims,omitempty"`
 }
 
 // SetOptions holds optional configuration for Store.Set.

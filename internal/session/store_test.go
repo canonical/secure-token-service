@@ -5,6 +5,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -86,6 +87,11 @@ func TestValkeyStore_SetAndGet(t *testing.T) {
 		RefreshToken: "refresh_token_encrypted",
 		ExpiresAt:    time.Now().Add(1 * time.Hour),
 		CreatedAt:    time.Now(),
+		Provider:     "openid",
+		Claims: map[string]interface{}{
+			"email":    "alice@canonical.com",
+			"nickname": "alice",
+		},
 	}
 
 	// Test Set
@@ -110,6 +116,59 @@ func TestValkeyStore_SetAndGet(t *testing.T) {
 
 	if retrieved.AccessToken != session.AccessToken {
 		t.Errorf("AccessToken mismatch: got %v, want %v", retrieved.AccessToken, session.AccessToken)
+	}
+
+	if retrieved.Provider != session.Provider {
+		t.Errorf("Provider mismatch: got %v, want %v", retrieved.Provider, session.Provider)
+	}
+
+	if retrieved.Claims["email"] != "alice@canonical.com" {
+		t.Errorf("Claims[email] mismatch: got %v, want alice@canonical.com", retrieved.Claims["email"])
+	}
+
+	if retrieved.Claims["nickname"] != "alice" {
+		t.Errorf("Claims[nickname] mismatch: got %v, want alice", retrieved.Claims["nickname"])
+	}
+}
+
+func TestSession_JSONSerialization(t *testing.T) {
+	orig := &Session{
+		SessionID: "sess-json",
+		UserID:    "alice@canonical.com",
+		Provider:  "openid",
+		Claims: map[string]interface{}{
+			"email":    "alice@canonical.com",
+			"nickname": "alice",
+			"name":     "Alice Smith",
+		},
+		ExpiresAt: time.Now().Truncate(time.Second),
+		CreatedAt: time.Now().Truncate(time.Second),
+	}
+
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var parsed Session
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("json.Unmarshal failed: %v", err)
+	}
+
+	if parsed.SessionID != orig.SessionID {
+		t.Errorf("SessionID mismatch: got %v, want %v", parsed.SessionID, orig.SessionID)
+	}
+	if parsed.UserID != orig.UserID {
+		t.Errorf("UserID mismatch: got %v, want %v", parsed.UserID, orig.UserID)
+	}
+	if parsed.Provider != orig.Provider {
+		t.Errorf("Provider mismatch: got %v, want %v", parsed.Provider, orig.Provider)
+	}
+	if parsed.Claims["email"] != "alice@canonical.com" {
+		t.Errorf("Claims[email] mismatch: got %v, want alice@canonical.com", parsed.Claims["email"])
+	}
+	if parsed.Claims["name"] != "Alice Smith" {
+		t.Errorf("Claims[name] mismatch: got %v, want Alice Smith", parsed.Claims["name"])
 	}
 }
 
