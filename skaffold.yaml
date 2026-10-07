@@ -1,6 +1,8 @@
 apiVersion: skaffold/v4beta1
 kind: Config
 build:
+  local:
+    push: true
   artifacts:
   - image: secure-token-service
     sync:
@@ -9,6 +11,11 @@ build:
       dependencies:
         paths:
           - rockcraft.yaml
+          - cmd/**
+          - internal/**
+          - go.mod
+          - go.sum
+          - Makefile
     platforms: ["linux/amd64"]
 manifests:
   kustomize:
