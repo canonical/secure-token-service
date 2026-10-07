@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/canonical/secure-token-service/internal/constants"
+	"github.com/canonical/secure-token-service/internal/cookie"
 	"github.com/canonical/secure-token-service/internal/observability"
 	"github.com/canonical/secure-token-service/internal/session"
 )
@@ -45,15 +46,39 @@ func WithAllowedHosts(hosts []string) ServerOption {
 	}
 }
 
-// Server handles HTTP endpoints for OIDC flow and JWKS.
+// WithOpenIDProvider sets the OpenID provider implementation.
+func WithOpenIDProvider(provider OpenIDProvider) ServerOption {
+	return func(s *Server) {
+		s.openIDProvider = provider
+	}
+}
+
+// WithDefaultAuthProvider sets the default authentication provider ("oidc" or "openid").
+func WithDefaultAuthProvider(provider string) ServerOption {
+	return func(s *Server) {
+		s.defaultProvider = provider
+	}
+}
+
+// WithSessionExpiry sets the duration for newly created sessions.
+func WithSessionExpiry(expiry time.Duration) ServerOption {
+	return func(s *Server) {
+		s.sessionExpiry = expiry
+	}
+}
+
+// Server handles HTTP endpoints for OIDC flow, OpenID flow, and JWKS.
 type Server struct {
-	sessionStore  session.Store
-	keyManager    KeyManager
-	cookieManager AuthCookieManager
-	oidcProvider  OIDCProvider
-	observability *observability.Observability
-	allowedHosts  []string
-	server        *http.Server
+	sessionStore    session.Store
+	keyManager      KeyManager
+	cookieManager   AuthCookieManager
+	oidcProvider    OIDCProvider
+	openIDProvider  OpenIDProvider
+	defaultProvider string
+	sessionExpiry   time.Duration
+	observability   *observability.Observability
+	allowedHosts    []string
+	server          *http.Server
 }
 
 // logger returns the zap logger from observability, or creates a new one if not available
@@ -89,9 +114,10 @@ func NewServer(store session.Store, km KeyManager, cm AuthCookieManager, provide
 func (s *Server) Router() http.Handler {
 	r := chi.NewRouter()
 
-	// OIDC endpoints
+	// Auth endpoints
 	r.Get("/auth/login", s.handleLogin)
 	r.Get("/auth/callback", s.handleCallback)
+	r.Get("/auth/openid/callback", s.handleOpenIDCallback)
 	r.Post("/auth/logout", s.handleLogout)
 	r.Get("/auth/sessions", s.handleSessions)
 
@@ -144,9 +170,10 @@ func (s *Server) StartWithMiddleware(port string) error {
 	// Homepage
 	r.Get("/", s.handleHome)
 
-	// OIDC endpoints
+	// Auth endpoints
 	r.Get("/auth/login", s.handleLogin)
 	r.Get("/auth/callback", s.handleCallback)
+	r.Get("/auth/openid/callback", s.handleOpenIDCallback)
 	r.Post("/auth/logout", s.handleLogout)
 	r.Get("/auth/sessions", s.handleSessions)
 
@@ -248,7 +275,7 @@ func matchHost(targetHost, targetHostname, allowed string) bool {
 	return strings.EqualFold(targetHostname, allowed) || strings.EqualFold(targetHost, allowed)
 }
 
-// handleLogin initiates the OIDC login flow.
+// handleLogin initiates the authentication flow with the selected provider.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// 1. Get return_to URL
 	returnTo := r.URL.Query().Get("return_to")
@@ -261,24 +288,85 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Generate and store state
-	state, err := s.cookieManager.SetOIDCState(w, r, returnTo)
-	if err != nil {
-		s.logger(r.Context()).Error("failed to generate state", zap.Error(err))
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
+	// 2. Determine provider
+	provider := r.URL.Query().Get("provider")
+	if provider == "" {
+		if s.defaultProvider != "" {
+			provider = s.defaultProvider
+		} else {
+			provider = "oidc"
+		}
 	}
 
-	// 3. Generate and store nonce
-	nonce, err := s.cookieManager.SetOIDCNonce(w, r)
-	if err != nil {
-		s.logger(r.Context()).Error("failed to generate nonce", zap.Error(err))
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	switch provider {
+	case "oidc":
+		if s.oidcProvider == nil {
+			s.logger(r.Context()).Error("OIDC provider not configured")
+			http.Error(w, "OIDC provider not configured", http.StatusInternalServerError)
+			return
+		}
+
+		// Generate and store state
+		state, err := s.cookieManager.SetAuthState(w, r, cookie.AuthState{
+			ReturnTo: returnTo,
+			Provider: "oidc",
+		})
+		if err != nil {
+			s.logger(r.Context()).Error("failed to generate state", zap.Error(err))
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Generate and store nonce
+		nonce, err := s.cookieManager.SetOIDCNonce(w, r)
+		if err != nil {
+			s.logger(r.Context()).Error("failed to generate nonce", zap.Error(err))
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Redirect to OIDC provider
+		http.Redirect(w, r, s.oidcProvider.AuthCodeURL(state, oidc.Nonce(nonce)), http.StatusFound)
+
+	case "openid":
+		if s.openIDProvider == nil {
+			s.logger(r.Context()).Error("openid provider not configured")
+			http.Error(w, "OpenID provider not configured", http.StatusInternalServerError)
+			return
+		}
+
+		// Generate and store state
+		state, err := s.cookieManager.SetAuthState(w, r, cookie.AuthState{
+			ReturnTo: returnTo,
+			Provider: "openid",
+		})
+		if err != nil {
+			s.logger(r.Context()).Error("failed to generate state", zap.Error(err))
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// OpenID return_to URL pointing to /auth/openid/callback
+		scheme := "http"
+		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+			scheme = "https"
+		}
+		returnToCallback := fmt.Sprintf("%s://%s/auth/openid/callback", scheme, r.Host)
+
+		authURL, err := s.openIDProvider.BuildAuthURL(returnToCallback, state)
+		if err != nil {
+			s.logger(r.Context()).Error("failed to build OpenID auth URL", zap.Error(err))
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, authURL, http.StatusFound)
+
+	default:
+		s.logger(r.Context()).Warn("unsupported auth provider", zap.String("provider", provider))
+		http.Error(w, fmt.Sprintf("Unsupported provider: %s", provider), http.StatusBadRequest)
 		return
 	}
-
-	// 4. Redirect to OIDC provider
-	http.Redirect(w, r, s.oidcProvider.AuthCodeURL(state, oidc.Nonce(nonce)), http.StatusFound)
 }
 
 // handleCallback handles the OIDC callback.
@@ -294,16 +382,21 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 1. Verify state
-	stateData, err := s.cookieManager.GetOIDCState(r)
+	stateData, err := s.cookieManager.GetAuthState(r)
 	if err != nil {
 		s.logger(r.Context()).Error("state verification failed", zap.Error(err))
 		http.Error(w, "Invalid state", http.StatusBadRequest)
 		return
 	}
-	s.cookieManager.ClearOIDCState(w, r)
+	s.cookieManager.ClearAuthState(w, r)
 
-	if r.URL.Query().Get("state") != stateData["state"] {
+	if r.URL.Query().Get("state") != stateData.State {
 		http.Error(w, "State mismatch", http.StatusBadRequest)
+		return
+	}
+
+	if stateData.Provider != "" && stateData.Provider != "oidc" {
+		http.Error(w, "Provider mismatch", http.StatusBadRequest)
 		return
 	}
 
@@ -366,6 +459,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	sess := &session.Session{
 		SessionID:    sessionID,
 		UserID:       claims.Email,
+		Provider:     "oidc",
 		AccessToken:  oauth2Token.AccessToken(),
 		IDToken:      idToken.GetOriginalToken(),
 		RefreshToken: oauth2Token.RefreshToken(),
@@ -380,24 +474,14 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 6. Set Session Cookie
-	encodedSession, err := s.cookieManager.Encode("session_id", sessionID)
-	if err != nil {
-		s.logger(r.Context()).Error("failed to encode session cookie", zap.Error(err))
+	if err := s.cookieManager.SetSessionCookie(w, r, sessionID, sess.ExpiresAt); err != nil {
+		s.logger(r.Context()).Error("failed to set session cookie", zap.Error(err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session_id",
-		Value:    encodedSession,
-		Path:     "/",
-		Expires:  sess.ExpiresAt,
-		HttpOnly: true,
-		Secure:   true,
-	})
-
 	// 7. Redirect to return_to
-	returnTo := stateData["return_to"]
+	returnTo := stateData.ReturnTo
 	if returnTo == "" || !s.isValidReturnTo(returnTo, r.Host) {
 		if returnTo != "" {
 			s.logger(r.Context()).Warn("invalid return_to parameter; falling back to /", zap.String("return_to", returnTo))
@@ -408,7 +492,114 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, returnTo, http.StatusFound)
 }
 
-// Helpers removed - logic moved to CookieManager
+// handleOpenIDCallback handles the Ubuntu One OpenID 2.0 authentication callback.
+func (s *Server) handleOpenIDCallback(w http.ResponseWriter, r *http.Request) {
+	// 0. Check for user cancellation or errors
+	if r.URL.Query().Get("openid.mode") == "cancel" {
+		s.logger(r.Context()).Warn("OpenID authentication cancelled by user")
+		http.Error(w, "Login cancelled", http.StatusBadRequest)
+		return
+	}
+	if errParam := r.URL.Query().Get("error"); errParam != "" {
+		s.logger(r.Context()).Error("OpenID login failed with error", zap.String("error", errParam))
+		http.Error(w, fmt.Sprintf("Login failed: %s", errParam), http.StatusBadRequest)
+		return
+	}
+
+	if s.openIDProvider == nil {
+		s.logger(r.Context()).Error("OpenID provider not configured")
+		http.Error(w, "OpenID provider not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// 1. Verify state cookie
+	stateData, err := s.cookieManager.GetAuthState(r)
+	if err != nil {
+		s.logger(r.Context()).Error("state verification failed", zap.Error(err))
+		http.Error(w, "Invalid state", http.StatusBadRequest)
+		return
+	}
+	s.cookieManager.ClearAuthState(w, r)
+
+	if r.URL.Query().Get("state") != stateData.State {
+		http.Error(w, "State mismatch", http.StatusBadRequest)
+		return
+	}
+
+	if stateData.Provider != "openid" {
+		http.Error(w, "Provider mismatch", http.StatusBadRequest)
+		return
+	}
+
+	// 2. Direct verification with OpenID Provider (check_authentication)
+	claims, err := s.openIDProvider.VerifyCallback(r.Context(), r)
+	if err != nil {
+		s.logger(r.Context()).Error("failed to verify OpenID callback", zap.Error(err))
+		http.Error(w, "OpenID verification failed: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// 3. Extract user ID
+	userID, err := claims.UserID()
+	if err != nil || userID == "" {
+		s.logger(r.Context()).Error("failed to extract user ID from OpenID claims", zap.Error(err))
+		http.Error(w, "Failed to extract user ID from claims", http.StatusBadRequest)
+		return
+	}
+
+	if claims.Email != "" {
+		s.logger(r.Context()).Info("OpenID authenticated user",
+			zap.String("user_id", userID),
+			zap.String("email", claims.Email),
+			zap.String("claimed_id", claims.ClaimedID))
+	} else {
+		s.logger(r.Context()).Warn("OpenID callback missing email attribute",
+			zap.String("user_id", userID),
+			zap.String("claimed_id", claims.ClaimedID))
+	}
+
+	// 4. Create session
+	sessionID := uuid.New().String()
+	now := time.Now()
+	expiryDuration := s.sessionExpiry
+	if expiryDuration <= 0 {
+		expiryDuration = 24 * time.Hour
+	}
+	expiresAt := now.Add(expiryDuration)
+
+	sess := &session.Session{
+		SessionID: sessionID,
+		UserID:    userID,
+		Provider:  "openid",
+		Claims:    claims.NormalizedClaims(),
+		CreatedAt: now,
+		ExpiresAt: expiresAt,
+	}
+
+	if err := s.sessionStore.Set(r.Context(), sess); err != nil {
+		s.logger(r.Context()).Error("failed to save session", zap.Error(err))
+		http.Error(w, "Failed to create session", http.StatusInternalServerError)
+		return
+	}
+
+	// 5. Set Session Cookie
+	if err := s.cookieManager.SetSessionCookie(w, r, sessionID, sess.ExpiresAt); err != nil {
+		s.logger(r.Context()).Error("failed to set session cookie", zap.Error(err))
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// 6. Redirect to return_to
+	returnTo := stateData.ReturnTo
+	if returnTo == "" || !s.isValidReturnTo(returnTo, r.Host) {
+		if returnTo != "" {
+			s.logger(r.Context()).Warn("invalid return_to parameter; falling back to /", zap.String("return_to", returnTo))
+		}
+		returnTo = "/"
+	}
+
+	http.Redirect(w, r, returnTo, http.StatusFound)
+}
 
 // handleLogout handles user logout.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -424,15 +615,8 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Clear cookie
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session_id",
-		Value:    "",
-		Path:     "/",
-		Expires:  time.Unix(0, 0),
-		HttpOnly: true,
-		Secure:   true,
-	})
+	// Clear cookie using standardized CookieManager
+	s.cookieManager.ClearSessionCookie(w, r)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Logged out"))

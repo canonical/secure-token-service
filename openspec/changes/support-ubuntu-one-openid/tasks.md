@@ -19,9 +19,9 @@
 
 ## 4. HTTP Presentation & Presentation Routing
 
-- [ ] 4.1 Update `handleLogin` in `internal/http/server.go` to accept optional `?provider=openid|oidc` query parameter, record provider in state cookie, and redirect to the selected provider. Unit test: test `handleLogin` with default, explicit OIDC, explicit OpenID, and invalid provider in `server_test.go`.
-- [ ] 4.2 Add `handleOpenIDCallback` in `internal/http/server.go` (registered at `GET /auth/openid/callback`) dedicated to verifying Ubuntu One OpenID responses, creating sessions, and issuing standardized cookies, leaving `/auth/callback` pure OIDC. Unit test: mock OpenID provider verification and verify session creation in `server_test.go`.
-- [ ] 4.3 Update `handleCallback`, `handleOpenIDCallback`, and `handleLogout` in `internal/http/server.go` to use `cookieManager.SetSessionCookie` and `cookieManager.ClearSessionCookie`. Unit test: verify cookie headers on login, callbacks, and logout in `server_test.go`.
+- [x] 4.1 Update `handleLogin` in `internal/http/server.go` to accept optional `?provider=openid|oidc` query parameter, record provider in state cookie, and redirect to the selected provider. Unit test: test `handleLogin` with default, explicit OIDC, explicit OpenID, and invalid provider in `server_test.go`.
+- [x] 4.2 Add `handleOpenIDCallback` in `internal/http/server.go` (registered at `GET /auth/openid/callback`) dedicated to verifying Ubuntu One OpenID responses, creating sessions, and issuing standardized cookies, leaving `/auth/callback` pure OIDC. Unit test: mock OpenID provider verification and verify session creation in `server_test.go`.
+- [x] 4.3 Update `handleCallback`, `handleOpenIDCallback`, and `handleLogout` in `internal/http/server.go` to use `cookieManager.SetSessionCookie` and `cookieManager.ClearSessionCookie`. Unit test: verify cookie headers on login, callbacks, and logout in `server_test.go`.
 
 ## 5. Token Minting & gRPC Integration
 

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/canonical/secure-token-service/internal/auth/openid"
 	"github.com/canonical/secure-token-service/internal/cookie"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"golang.org/x/oauth2"
@@ -77,3 +78,10 @@ type OIDCProvider interface {
 	Verifier() interface{}
 	VerifyIDToken(ctx context.Context, rawIDToken string) (IDToken, error)
 }
+
+// OpenIDProvider defines the interface for OpenID 2.0 provider operations
+type OpenIDProvider interface {
+	BuildAuthURL(returnToURL, stateToken string) (string, error)
+	VerifyCallback(ctx context.Context, r *http.Request) (*openid.Claims, error)
+}
+

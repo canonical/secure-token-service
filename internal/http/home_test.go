@@ -3,7 +3,7 @@
 
 package httpserver
 
-//go:generate mockgen -build_flags=--mod=mod -package httpserver -destination ./mock_interfaces.go github.com/canonical/secure-token-service/internal/http AuthCookieManager,KeyManager,OIDCProvider
+//go:generate mockgen -build_flags=--mod=mod -package httpserver -destination ./mock_interfaces.go github.com/canonical/secure-token-service/internal/http AuthCookieManager,KeyManager,OIDCProvider,OpenIDProvider
 //go:generate mockgen -build_flags=--mod=mod -package httpserver -destination ./mock_store.go -source=../session/store.go
 
 import (
