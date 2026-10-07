@@ -66,6 +66,73 @@ func TestExchangeSession(t *testing.T) {
 	}
 }
 
+// TestExchangeSession_WithOpenIDClaims tests that session claims are forwarded to MintToken
+func TestExchangeSession_WithOpenIDClaims(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx := context.Background()
+
+	// Create generated mocks
+	cookieManager := NewMockCookieManager(ctrl)
+	sessionStore := NewMockSessionStore(ctrl)
+	keyManager := NewMockKeyManager(ctrl)
+
+	// Create server
+	server := NewServer(sessionStore, keyManager, cookieManager, "test-issuer", "test-audience", 3600, nil)
+
+	// Setup mock expectations
+	cookieManager.EXPECT().
+		Decode("session_id", "openid-cookie").
+		Return("session-openid-123", nil)
+
+	sessionStore.EXPECT().
+		Get(ctx, "session-openid-123").
+		Return(&session.Session{
+			SessionID: "session-openid-123",
+			UserID:    "user@example.com",
+			Provider:  "openid",
+			Claims: map[string]interface{}{
+				"nickname":     "testuser",
+				"name":         "Test User",
+				"idp_provider": "ubuntuone",
+				"email":        "ignored-override@example.com", // should be overridden by UserID
+			},
+		}, nil)
+
+	expectedClaims := map[string]interface{}{
+		"email":        "user@example.com",
+		"nickname":     "testuser",
+		"name":         "Test User",
+		"idp_provider": "ubuntuone",
+	}
+
+	keyManager.EXPECT().
+		MintToken("user@example.com", "test-issuer", "test-audience", 3600, expectedClaims).
+		Return("mock-jwt-token-openid", nil)
+
+	// Execute test
+	req := &stsv1.ExchangeRequest{
+		SessionCookie: "openid-cookie",
+	}
+
+	resp, err := server.ExchangeSession(ctx, req)
+
+	// Assertions
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	if resp.AccessToken != "mock-jwt-token-openid" {
+		t.Errorf("Expected token 'mock-jwt-token-openid', got: %s", resp.AccessToken)
+	}
+
+	if resp.ExpiresIn != 3600 {
+		t.Errorf("Expected expiry 3600, got: %d", resp.ExpiresIn)
+	}
+}
+
+
 // TestRevokeUserSessions tests the RevokeUserSessions RPC method
 func TestRevokeUserSessions(t *testing.T) {
 	ctrl := gomock.NewController(t)

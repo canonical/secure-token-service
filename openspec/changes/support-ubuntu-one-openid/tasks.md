@@ -25,7 +25,7 @@
 
 ## 5. Token Minting & gRPC Integration
 
-- [ ] 5.1 Update `ExchangeSession` in `internal/grpc/server.go` to merge `sess.Claims` into the internal JWT claims map prior to calling `MintToken`. Unit test: verify that minted JWT contains extracted OpenID attributes in `server_test.go`.
+- [x] 5.1 Update `ExchangeSession` in `internal/grpc/server.go` to merge `sess.Claims` into the internal JWT claims map prior to calling `MintToken`. Unit test: verify that minted JWT contains extracted OpenID attributes in `server_test.go`.
 
 ## 6. Documentation & Rollout
 

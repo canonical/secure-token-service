@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 
 	stsv1 "github.com/canonical/secure-token-service/api/proto/v1"
 	"github.com/canonical/secure-token-service/internal/observability"
@@ -77,9 +78,17 @@ func (s *Server) ExchangeSession(ctx context.Context, req *stsv1.ExchangeRequest
 		return nil, status.Error(codes.NotFound, "session not found")
 	}
 
-	// TODO: Add custom claims from session/user profile
-	claims := map[string]interface{}{
-		"email": sess.UserID,
+	// Merge session claims while ensuring primary identity is preserved
+	claims := make(map[string]interface{})
+	for k, v := range sess.Claims {
+		claims[k] = v
+	}
+	if strings.Contains(sess.UserID, "@") {
+		claims["email"] = sess.UserID
+	} else if emailVal, ok := sess.Claims["email"].(string); ok && emailVal != "" {
+		claims["email"] = emailVal
+	} else {
+		claims["email"] = sess.UserID
 	}
 
 	// Mint internal JWT
