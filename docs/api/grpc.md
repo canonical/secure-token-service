@@ -158,7 +158,7 @@ Exchanges an upstream IdP access token (issued via OAuth2 client credentials gra
 
 | gRPC Status | Condition | Description |
 |-------------|-----------|-------------|
-| `INVALID_ARGUMENT` | Empty/whitespace token, nil request, or token missing `sub`/`client_id` claim | Request validation failed |
+| `INVALID_ARGUMENT` | Empty/whitespace token, token exceeding 64 KB, invalid/oversized subject claim (>256 chars or control characters), nil request, or token missing `sub`/`client_id` claim | Request validation failed |
 | `UNAUTHENTICATED` | Token expired, remaining validity < 60s, invalid signature, or untrusted issuer | Token validation failed |
 | `UNAVAILABLE` | Upstream IdP JWKS endpoint unreachable or key set empty | Upstream service error |
 | `UNIMPLEMENTED` | Token verifier not configured on STS server | Service configuration error |
@@ -307,6 +307,9 @@ Upstream IdP public keys are fetched at STS startup and kept refreshed periodica
 2. **Network isolation**: gRPC port (9090) should be internal-only, not exposed to public internet
 3. **Minimum Expiration Clamping**: Upstream tokens with remaining validity under 60 seconds are rejected outright to prevent issuing tokens that expire mid-flight
 4. **Synthetic Identity**: Client credentials tokens are assigned a synthetic email `<client_id>@serviceaccount.local` for compatibility with internal services requiring an email claim
+5. **Maximum Token Size**: Tokens exceeding 64 KB are rejected with `INVALID_ARGUMENT` to prevent memory exhaustion and DoS attacks
+6. **Machine Claim Validation**: Upstream `sub` and `client_id` claims must be non-empty strings, at most 256 characters, and free of control characters or newlines
+7. **Clock Skew Tolerance**: Upstream JWT verification tolerates up to 5 seconds of clock skew leeway
 
 ## References
 

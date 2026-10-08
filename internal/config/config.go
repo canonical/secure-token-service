@@ -9,7 +9,7 @@ import (
 	"github.com/kelseyhightower/envconfig"
 )
 
-// Config holds configuration for the Session Service (Janus).
+// Config holds configuration for the Secure Token Service (STS).
 type Config struct {
 	// Database
 	DatabaseURL string `envconfig:"DATABASE_URL" default:"postgres://localhost:5432/sts?sslmode=disable"`

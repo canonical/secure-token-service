@@ -1,12 +1,13 @@
 openapi: 3.0.3
 info:
-  title: Secure Token Service (Janus) API  
+  title: Secure Token Service (STS) API  
   description: |
     Security Token Service implementing the Phantom Token Pattern for session management and JWT issuance.
     
     This service provides:
     - OIDC authentication with opaque session cookies
     - Session-to-JWT exchange for internal services (gRPC)
+    - M2M token exchange for client credentials access tokens (gRPC)
     - JWKS endpoint for JWT verification
   version: 1.0.0
   contact:

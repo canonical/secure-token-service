@@ -38,11 +38,16 @@ grpcurl -plaintext localhost:9090 list sts.v1.SecurityTokenService
 
 # Output:
 # sts.v1.SecurityTokenService.ExchangeSession
+# sts.v1.SecurityTokenService.ExchangeToken
 # sts.v1.SecurityTokenService.RevokeUserSessions
 
-# Call a method with reflection
-grpcurl -plaintext -d '{"session_id": "test-123"}' \
+# Call ExchangeSession with reflection
+grpcurl -plaintext -d '{"session_cookie": "test-cookie-value"}' \
   localhost:9090 sts.v1.SecurityTokenService/ExchangeSession
+
+# Call ExchangeToken (M2M) with reflection
+grpcurl -plaintext -d '{"token": "upstream-hydra-token-jwt"}' \
+  localhost:9090 sts.v1.SecurityTokenService/ExchangeToken
 ```
 
 ### Testing
