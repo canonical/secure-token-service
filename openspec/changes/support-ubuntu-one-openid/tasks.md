@@ -3,7 +3,7 @@
 ## 1. Configuration & Domain Models
 
 - [ ] 1.1 Add Ubuntu One OpenID configuration fields (`UBUNTU_ONE_OPENID_URL`, `UBUNTU_ONE_REALM`, `DEFAULT_AUTH_PROVIDER`) to `internal/config/config.go`. Unit test: verify environment variable parsing and defaults in `config_test.go`.
-- [ ] 1.2 Extend `session.Session` struct in `internal/session/store.go` with `Provider string` and `Claims map[string]interface{}` fields. Unit test: verify JSON serialization and deserialization in Valkey session store tests.
+- [ ] 1.2 Extend `session.Session` struct in `internal/session/store.go` with `Provider string` and `Claims map[string]any` fields. Unit test: verify JSON serialization and deserialization in Valkey session store tests.
 
 ## 2. Standardized Cookie Generation
 
@@ -13,9 +13,9 @@
 
 ## 3. Ubuntu One OpenID Provider Client
 
-- [ ] 3.1 Implement OpenID 2.0 URL generator for Ubuntu One in `internal/auth/openid/ubuntuone.go` requesting Attribute Exchange schemas for email, nickname, and fullname. Unit test: verify query parameters and AX schemas.
+- [ ] 3.1 Implement OpenID 2.0 URL generator for Ubuntu One in `internal/auth/openid/ubuntuone.go` requesting Simple Registration (SREG 1.1) and Attribute Exchange (AX 1.0) schemas for email, nickname, and fullname. Unit test: verify query parameters, SREG, and AX schemas.
 - [ ] 3.2 Implement OpenID 2.0 direct verification (`check_authentication`) via HTTP POST in `internal/auth/openid/ubuntuone.go`. Unit test: verify handling of `is_valid:true`, `is_valid:false`, cancellation, and error responses using `httptest.Server`.
-- [ ] 3.3 Implement OpenID claims extraction and normalization in `internal/auth/openid/ubuntuone.go`, producing a normalized map and selecting `UserID` via `email` -> `nickname` -> `claimed_id` fallback. Unit test: test claims extraction under full, partial, and minimal attribute responses.
+- [ ] 3.3 Implement OpenID claims extraction and normalization in `internal/auth/openid/ubuntuone.go`, extracting attributes from SREG 1.1 and AX 1.0 extensions, producing a normalized map and selecting `UserID` via `email` -> `nickname` -> `claimed_id` fallback. Unit test: test claims extraction under full, partial, and minimal attribute responses.
 
 ## 4. HTTP Presentation & Presentation Routing
 
@@ -35,10 +35,10 @@
 
 ## Verification Suite
 
-- Unit test suite: `go test -v ./internal/config/... ./internal/cookie/... ./internal/http/... ./internal/grpc/...`
-- OpenSpec drift validation: `openspec validate support-ubuntu-one-openid`
+- Unit test suite: `go test -v -race ./internal/...`
+- OpenSpec validation: `openspec validate support-ubuntu-one-openid --strict`
 - Linting and vulnerability check: `golangci-lint run ./...` and `govulncheck ./...`
 
 ## Implementation Notes
 
-*(Any deviations or adjustments discovered during implementation will be recorded here.)*
+- **Canonical SSO Protocol Compatibility (SREG 1.1)**: Canonical SSO (`login.ubuntu.com/+openid` and `sso.iam.test.canonical.com/+openid`, powered by Launchpad's identity provider) specifically responds to OpenID Simple Registration (SREG 1.1: `openid.ns.sreg=http://openid.net/extensions/sreg/1.1`) with `openid.sreg.required=email,nickname` and `openid.sreg.optional=fullname`. When only Attribute Exchange (AX 1.0) is requested, Canonical SSO does not release identity attributes, resulting in empty email claims. STS requests both SREG 1.1 and AX 1.0 in authorization requests and inspects both namespaces upon callback verification, prioritizing SREG to ensure the user's verified email is populated into `sub` and `email` for downstream microservice parity.

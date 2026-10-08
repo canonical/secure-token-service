@@ -4,7 +4,7 @@
 
 The Secure Token Service (STS / Janus) implements the Phantom Token Pattern, allowing external web clients to authenticate via upstream Identity Providers and receive opaque session cookies, while internal microservices exchange these cookies via gRPC for short-lived, cryptographically signed internal JWTs (ADR-004).
 
-Currently, the service only integrates with an OpenID Connect (OIDC) provider. However, many systems across Canonical require authentication via **Ubuntu One Single Sign-On** (`login.ubuntu.com/+openid`), which implements the OpenID 2.0 protocol with Attribute Exchange (AX).
+Currently, the service only integrates with an OpenID Connect (OIDC) provider. However, many systems across Canonical require authentication via **Ubuntu One Single Sign-On** (`login.ubuntu.com/+openid`), which implements the OpenID 2.0 protocol with Simple Registration (SREG 1.1) and Attribute Exchange (AX 1.0).
 
 To support this without compromising future architectural health, this design adheres to three core principles established during discovery:
 1. **Plain Binary Authentication**: No Launchpad team memberships or access gating; authentication is plain and simple (valid user vs rejected).
@@ -18,7 +18,7 @@ To support this without compromising future architectural health, this design ad
 ### Goals
 - **Multi-Provider Login Endpoint**: Allow clients to request either OIDC or Ubuntu One OpenID via `/auth/login?provider=openid` or `?provider=oidc` (defaulting to `oidc`).
 - **Dedicated OpenID Callback (`/auth/openid/callback`)**: Dedicated route for handling Ubuntu One OpenID responses, separating legacy OpenID 2.0 handling from modern OIDC flow.
-- **Ubuntu One OpenID 2.0 Relying Party**: Implement a lightweight OpenID 2.0 relying party client that requests basic user attributes (email, nickname, fullname) via Attribute Exchange (AX) and verifies assertions directly via `check_authentication`.
+- **Ubuntu One OpenID 2.0 Relying Party**: Implement a lightweight OpenID 2.0 relying party client that requests basic user attributes (email, nickname, fullname) via Simple Registration (SREG 1.1) and Attribute Exchange (AX 1.0) and verifies assertions directly via `check_authentication`.
 - **Standardized Cookie Management**: Refactor `CookieManager` into the single authority for creating, formatting, and clearing all cookies (`session_id`, `oauth_state`, `oauth_nonce`) with unified security attributes (`HttpOnly: true`, `SameSite: Lax`, dynamic `Secure` based on request protocol, standardized `Path: "/"`).
 - **Downstream Parity**: Ensure that internal JWTs minted by gRPC `ExchangeSession` maintain complete parity (`sub: email`, `email: email`).
 
@@ -47,7 +47,7 @@ flowchart TD
 
     subgraph AuthProviders["Authentication Providers"]
         oidcProv["internal/http/oidc.go<br/><b>[UNCHANGED]</b><br/>• Existing OIDC Provider"]
-        u1Prov["internal/auth/openid/ubuntuone.go<br/><b>[NEW]</b><br/>• OpenID 2.0 Request Builder (AX)<br/>• Stateless Verification (check_authentication)<br/>• OpenID Claims Parser"]
+        u1Prov["internal/auth/openid/ubuntuone.go<br/><b>[NEW]</b><br/>• OpenID 2.0 Request Builder (SREG 1.1 + AX)<br/>• Stateless Verification (check_authentication)<br/>• OpenID Claims Parser"]
     end
 
     subgraph Storage["Session Storage Layer"]
@@ -80,14 +80,14 @@ flowchart TD
 
 | File / Component | Status | Responsibilities & Changes |
 |---|---|---|
-| [`internal/config/config.go`](file:///home/shipperizer/shipperizer/secure-token-service/internal/config/config.go) | Modified | Adds `UBUNTU_ONE_OPENID_URL` (default: `https://login.ubuntu.com/+openid`), `UBUNTU_ONE_REALM`, and `DEFAULT_AUTH_PROVIDER`. |
-| [`internal/cookie/cookie.go`](file:///home/shipperizer/shipperizer/secure-token-service/internal/cookie/cookie.go) | Modified | Encapsulates full session cookie generation (`SetSessionCookie`, `ClearSessionCookie`), updates state cookie to store provider metadata (`SetAuthState`, `GetAuthState`), standardizes `SameSite=Lax`, dynamic `Secure`, and `HttpOnly`. |
-| [`internal/http/interfaces.go`](file:///home/shipperizer/shipperizer/secure-token-service/internal/http/interfaces.go) | Modified | Expands `AuthCookieManager` to include session cookie setter/clearer and generic `AuthState` methods. Defines `OpenIDProvider` interface. |
-| `internal/auth/openid/ubuntuone.go` | **New** | OpenID 2.0 relying party implementation: builds redirect URL with AX schemas (`email`, `nickname`, `fullname`), performs direct HTTP POST `check_authentication` verification, parses response. |
-| [`internal/session/store.go`](file:///home/shipperizer/shipperizer/secure-token-service/internal/session/store.go) | Modified | Extends `Session` struct with `Provider string` and `Claims map[string]interface{}` to retain upstream claims in Valkey. |
-| [`internal/http/server.go`](file:///home/shipperizer/shipperizer/secure-token-service/internal/http/server.go) | Modified | `handleLogin`: reads `?provider=...`, generates state preserving provider choice, redirects to selected IdP.<br/>`handleCallback`: handles existing OIDC flow.<br/>`handleOpenIDCallback`: **new handler** dedicated to OpenID callback, verifies response with Ubuntu One, normalizes claims, sets standardized session cookie. |
-| [`internal/grpc/server.go`](file:///home/shipperizer/shipperizer/secure-token-service/internal/grpc/server.go) | Modified | `ExchangeSession`: ensures downstream JWT contract (`sub: email`, `email: email`) is maintained identically across both providers. |
-| [`docs/api/openapi.yaml`](file:///home/shipperizer/shipperizer/secure-token-service/docs/api/openapi.yaml) | Modified | Documents the `provider` query parameter on `/auth/login`, `/auth/openid/callback`, and updated cookie flags. |
+| [`internal/config/config.go`](internal/config/config.go) | Modified | Adds `UBUNTU_ONE_OPENID_URL` (default: `https://login.ubuntu.com/+openid`), `UBUNTU_ONE_REALM`, and `DEFAULT_AUTH_PROVIDER`. |
+| [`internal/cookie/cookie.go`](internal/cookie/cookie.go) | Modified | Encapsulates full session cookie generation (`SetSessionCookie`, `ClearSessionCookie`), updates state cookie to store provider metadata (`SetAuthState`, `GetAuthState`), standardizes `SameSite=Lax`, dynamic `Secure`, and `HttpOnly`. |
+| [`internal/http/interfaces.go`](internal/http/interfaces.go) | Modified | Expands `AuthCookieManager` to include session cookie setter/clearer and generic `AuthState` methods. Defines `OpenIDProvider` interface. |
+| `internal/auth/openid/ubuntuone.go` | **New** | OpenID 2.0 relying party implementation: builds redirect URL with SREG 1.1 and AX 1.0 schemas (`email`, `nickname`, `fullname`), performs direct HTTP POST `check_authentication` verification, parses response. |
+| [`internal/session/store.go`](internal/session/store.go) | Modified | Extends `Session` struct with `Provider string` and `Claims map[string]any` to retain upstream claims in Valkey. |
+| [`internal/http/server.go`](internal/http/server.go) | Modified | `handleLogin`: reads `?provider=...`, generates state preserving provider choice, redirects to selected IdP.<br/>`handleCallback`: handles existing OIDC flow.<br/>`handleOpenIDCallback`: **new handler** dedicated to OpenID callback, verifies response with Ubuntu One, normalizes claims, sets standardized session cookie. |
+| [`internal/grpc/server.go`](internal/grpc/server.go) | Modified | `ExchangeSession`: ensures downstream JWT contract (`sub: email`, `email: email`) is maintained identically across both providers. |
+| [`docs/api/openapi.yaml`](docs/api/openapi.yaml) | Modified | Documents the `provider` query parameter on `/auth/login`, `/auth/openid/callback`, and updated cookie flags. |
 
 ---
 
@@ -166,6 +166,16 @@ All cookie mutations are centralized in `CookieManager`, ensuring defense-in-dep
    http.SetCookie(w, cookie)
 ```
 
+### State Representation:
+
+```go
+type AuthState struct {
+    Provider string
+    ReturnTo string
+    State    string
+}
+```
+
 ### Public API Additions to CookieManager:
 - `SetSessionCookie(w http.ResponseWriter, r *http.Request, sessionID string, expiresAt time.Time) error`
 - `ClearSessionCookie(w http.ResponseWriter, r *http.Request)`
@@ -183,12 +193,12 @@ To avoid disrupting downstream services, internal tokens maintain strict structu
 
 | Internal Claim | Ubuntu One Attribute | OIDC Claim | Resolution Rule |
 |---|---|---|---|
-| **`sub`** | `openid.ax.value.email` | `sub` / `email` | Set to user email address (Option A) |
-| **`email`** | `openid.ax.value.email` | `email` | Set to user email address |
-| **`nickname`** | `openid.ax.value.nickname` | `preferred_username` | Optional supplemental claim if present |
-| **`name`** | `openid.ax.value.fullname` | `name` | Optional supplemental claim if present |
+| **`sub`** | `openid.sreg.email` / `openid.ax.value.email` | `sub` / `email` | Set to user email address (Option A) |
+| **`email`** | `openid.sreg.email` / `openid.ax.value.email` | `email` | Set to user email address |
+| **`nickname`** | `openid.sreg.nickname` / `openid.ax.value.nickname` | `preferred_username` | Optional supplemental claim if present |
+| **`name`** | `openid.sreg.fullname` / `openid.ax.value.fullname` | `name` | Optional supplemental claim if present |
 
-If email is missing in the OpenID response, the normalizer falls back to `nickname` or the unique `claimed_id` as the identity, but in normal Ubuntu One usage `email` is universally requested and populated.
+If email is missing in the OpenID response, the normalizer falls back to `nickname` or the unique `claimed_id` as the identity, but in normal Ubuntu One usage `email` is universally requested and populated via SREG 1.1.
 
 ---
 

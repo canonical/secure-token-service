@@ -33,3 +33,14 @@ When a user logs out, the system SHALL clear the session cookie through `CookieM
 - **WHEN** a client sends `POST /auth/logout` with an active session cookie
 - **THEN** the session is removed from storage
 - **THEN** the response includes a `Set-Cookie` header for `session_id` with empty value and an expired timestamp
+
+### Requirement: Authentication state and nonce cookie cleanup
+After processing an authentication callback (whether successful or failed), the system SHALL clear the `oauth_state` and `oauth_nonce` cookies via `CookieManager` with the standardized attributes (`Path: "/"`, `HttpOnly: true`, `SameSite: Lax`, matching dynamic `Secure` setting) and an expiration timestamp in the past (`time.Unix(0, 0)`).
+
+#### Scenario: Successful authentication callback clears state and nonce cookies
+- **WHEN** an authentication callback is processed successfully
+- **THEN** the system clears the `oauth_state` and `oauth_nonce` cookies via `CookieManager` using standardized attributes and expired timestamps
+
+#### Scenario: Failed authentication callback clears state and nonce cookies
+- **WHEN** an authentication callback fails verification, receives an error, or encounters an invalid state
+- **THEN** the system clears the `oauth_state` and `oauth_nonce` cookies via `CookieManager` using standardized attributes and expired timestamps before returning the error response
