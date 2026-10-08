@@ -2,8 +2,8 @@
 
 ## 1. Protobuf Definition & Bindings
 
-- [ ] 1.1 Update `api/proto/v1/sts.proto` to define `ExchangeTokenRequest` and add `rpc ExchangeToken(ExchangeTokenRequest) returns (ExchangeResponse)` to `SecurityTokenService`. Verify by running `make proto` (or `protoc`) and checking generated Go bindings.
-- [ ] 1.2 Verify generated protobuf Go structures compile and pass existing unit tests with `go test ./...`.
+- [x] 1.1 Update `api/proto/v1/sts.proto` to define `ExchangeTokenRequest` and add `rpc ExchangeToken(ExchangeTokenRequest) returns (ExchangeResponse)` to `SecurityTokenService`. Verify by running `make proto` (or `protoc`) and checking generated Go bindings.
+- [x] 1.2 Verify generated protobuf Go structures compile and pass existing unit tests with `go test ./...`.
 
 ## 2. Upstream IdP JWKS Preemptive Verifier
 

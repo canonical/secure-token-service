@@ -9,10 +9,14 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/canonical/secure-token-service/api/proto/v1;stsv1";
 
-// SecurityTokenService defines the interface for the Session Service (Janus).
+// SecurityTokenService defines the interface for the Secure Token Service.
 service SecurityTokenService {
   // ExchangeSession swaps an opaque session_id for a customized internal JWT.
   rpc ExchangeSession(ExchangeRequest) returns (ExchangeResponse);
+
+  // ExchangeToken swaps an upstream IdP access token (e.g., Hydra client credentials)
+  // for an internal STS JWT adhering to the ecosystem contract.
+  rpc ExchangeToken(ExchangeTokenRequest) returns (ExchangeResponse);
 
   // RevokeUserSessions forces a logout for a specific user, invalidating all sessions.
   rpc RevokeUserSessions(RevokeUserRequest) returns (RevokeUserResponse);
@@ -20,6 +24,10 @@ service SecurityTokenService {
 
 message ExchangeRequest {
   string session_cookie = 1;
+}
+
+message ExchangeTokenRequest {
+  string token = 1; // Raw upstream IdP access token (JWT)
 }
 
 message ExchangeResponse {
