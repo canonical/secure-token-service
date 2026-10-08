@@ -54,3 +54,7 @@ internal/db/mocks/
 
 # Vendor
 vendor/
+
+# Rocks
+*.rock
+
