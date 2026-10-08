@@ -20,7 +20,7 @@
 
 - [x] 4.1 Add Prometheus metrics for `ExchangeToken` (RPC handled counter, exchange duration histogram, clamped TTL histogram) and OpenTelemetry spans. Verify metrics registration via unit tests in `internal/grpc/server_test.go`.
 - [x] 4.2 Update gRPC API documentation in `docs/api/grpc.md` and `README.md` documenting `ExchangeToken`, request/response payloads, and error conditions. Verify markdown links and formatting.
-- [ ] 4.3 Add structured security audit logging (Zap) for token exchange events (successful exchanges and rejections with reason/code, client ID, clamped TTL, omitting raw tokens). Verify audit logs in unit tests.
+- [x] 4.3 Add structured security audit logging (Zap) for token exchange events (successful exchanges and rejections with reason/code, client ID, clamped TTL, omitting raw tokens). Verify audit logs in unit tests.
 
 ## Verification Suite
 

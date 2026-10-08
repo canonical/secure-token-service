@@ -6,16 +6,22 @@ package grpcserver
 //go:generate mockgen -build_flags=--mod=mod -package grpcserver -destination ./mock_interfaces.go -source=./interfaces.go
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	stsv1 "github.com/canonical/secure-token-service/api/proto/v1"
 	"github.com/canonical/secure-token-service/internal/auth"
+	"github.com/canonical/secure-token-service/internal/observability"
 	"github.com/canonical/secure-token-service/internal/session"
 	"go.uber.org/mock/gomock"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -347,6 +353,7 @@ func TestExchangeToken_VerifierErrors(t *testing.T) {
 		{"expired", auth.ErrTokenExpired, codes.Unauthenticated},
 		{"invalid signature", auth.ErrInvalidSignature, codes.Unauthenticated},
 		{"missing subject", auth.ErrMissingSubject, codes.InvalidArgument},
+		{"invalid subject", auth.ErrInvalidSubject, codes.InvalidArgument},
 		{"jwks unavailable", auth.ErrJWKSUnavailable, codes.Unavailable},
 	}
 
@@ -415,5 +422,142 @@ func TestExchangeToken_MintTokenError(t *testing.T) {
 	st, ok := status.FromError(err)
 	if !ok || st.Code() != codes.Internal {
 		t.Errorf("expected Internal error, got %v", err)
+	}
+}
+
+// TestExchangeToken_OversizedToken tests that tokens exceeding MaxTokenSizeBytes are rejected
+func TestExchangeToken_OversizedToken(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx := context.Background()
+	cookieManager := NewMockCookieManager(ctrl)
+	sessionStore := NewMockSessionStore(ctrl)
+	keyManager := NewMockKeyManager(ctrl)
+	tokenVerifier := NewMockTokenVerifier(ctrl)
+
+	server := NewServer(sessionStore, keyManager, cookieManager, "test-issuer", "test-audience", 3600, nil, WithTokenVerifier(tokenVerifier))
+
+	oversizedToken := strings.Repeat("a", MaxTokenSizeBytes+1)
+	req := &stsv1.ExchangeTokenRequest{Token: oversizedToken}
+
+	_, err := server.ExchangeToken(ctx, req)
+	if err == nil {
+		t.Fatal("expected error for oversized token, got nil")
+	}
+
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.InvalidArgument {
+		t.Errorf("expected InvalidArgument, got %v", err)
+	}
+}
+
+type mockCloserVerifier struct {
+	*MockTokenVerifier
+	closed bool
+}
+
+func (m *mockCloserVerifier) Close() error {
+	m.closed = true
+	return nil
+}
+
+// TestServer_Stop_ClosesVerifier verifies that Server.Stop() closes the token verifier if it implements io.Closer
+func TestServer_Stop_ClosesVerifier(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	cookieManager := NewMockCookieManager(ctrl)
+	sessionStore := NewMockSessionStore(ctrl)
+	keyManager := NewMockKeyManager(ctrl)
+	baseVerifier := NewMockTokenVerifier(ctrl)
+	closerVerifier := &mockCloserVerifier{MockTokenVerifier: baseVerifier}
+
+	server := NewServer(sessionStore, keyManager, cookieManager, "test-issuer", "test-audience", 3600, nil, WithTokenVerifier(closerVerifier))
+
+	server.Stop()
+	if !closerVerifier.closed {
+		t.Errorf("expected closerVerifier.Close() to have been called on Stop()")
+	}
+}
+
+// TestExchangeToken_SecurityAuditLogging verifies structured Zap audit logging on token exchange
+func TestExchangeToken_SecurityAuditLogging(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx := context.Background()
+	cookieManager := NewMockCookieManager(ctrl)
+	sessionStore := NewMockSessionStore(ctrl)
+	keyManager := NewMockKeyManager(ctrl)
+	tokenVerifier := NewMockTokenVerifier(ctrl)
+
+	var logBuf bytes.Buffer
+	encCfg := zap.NewProductionEncoderConfig()
+	core := zapcore.NewCore(
+		zapcore.NewJSONEncoder(encCfg),
+		zapcore.AddSync(&logBuf),
+		zap.InfoLevel,
+	)
+	obsLogger := zap.New(core)
+	obs := &observability.Observability{
+		Logger: &observability.Logger{Logger: obsLogger},
+	}
+
+	server := NewServer(sessionStore, keyManager, cookieManager, "test-issuer", "test-audience", 1800, obs, WithTokenVerifier(tokenVerifier))
+
+	rawToken := "secret-upstream-token-do-not-log"
+	upstreamExp := time.Now().Add(3600 * time.Second)
+
+	tokenVerifier.EXPECT().
+		Verify(ctx, rawToken).
+		Return(&auth.VerifiedToken{
+			Subject:   "audit-client",
+			ClientID:  "audit-client",
+			ExpiresAt: upstreamExp,
+			Claims:    map[string]interface{}{},
+		}, nil)
+
+	keyManager.EXPECT().
+		MintToken("audit-client", "test-issuer", "test-audience", 1800, gomock.Any()).
+		Return("minted-sts-jwt", nil)
+
+	req := &stsv1.ExchangeTokenRequest{Token: rawToken}
+	_, err := server.ExchangeToken(ctx, req)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Verify structured audit log entry in JSON buffer
+	logOutput := logBuf.String()
+	if !strings.Contains(logOutput, `"event":"sts.m2m.token_exchange"`) {
+		t.Errorf("expected event 'sts.m2m.token_exchange' in logs, got %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"outcome":"success"`) {
+		t.Errorf("expected outcome 'success' in logs, got %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"grpc_code":"OK"`) {
+		t.Errorf("expected grpc_code 'OK' in logs, got %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"client_id":"audit-client"`) {
+		t.Errorf("expected client_id 'audit-client' in logs, got %s", logOutput)
+	}
+	if !strings.Contains(logOutput, `"clamped_ttl_seconds":1800`) {
+		t.Errorf("expected clamped_ttl_seconds 1800 in logs, got %s", logOutput)
+	}
+
+	// Verify raw token is never leaked in log output
+	if strings.Contains(logOutput, rawToken) {
+		t.Errorf("raw token leaked in log output: %s", logOutput)
+	}
+
+	// Verify log line can be unmarshaled as valid JSON
+	var logEntry map[string]interface{}
+	err = json.Unmarshal([]byte(strings.TrimSpace(logOutput)), &logEntry)
+	if err != nil {
+		t.Fatalf("failed to unmarshal log line as JSON: %v (output: %s)", err, logOutput)
+	}
+	if logEntry["event"] != "sts.m2m.token_exchange" {
+		t.Errorf("expected parsed event 'sts.m2m.token_exchange', got %v", logEntry["event"])
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -305,4 +306,134 @@ func TestHydraTokenVerifier_StaticKeySet(t *testing.T) {
 	vt, err := verifier.Verify(ctx, token)
 	require.NoError(t, err)
 	assert.Equal(t, "machine-client", vt.Subject)
+}
+
+func TestHydraTokenVerifier_InvalidSubject_TooLong(t *testing.T) {
+	ctx := context.Background()
+	kid := "test-key-1"
+	privKey, jwksURL, srv, _ := setupTestJWKS(t, kid)
+	defer srv.Close()
+
+	verifier, err := NewHydraTokenVerifier(ctx, jwksURL)
+	require.NoError(t, err)
+	defer verifier.Close()
+
+	// sub exceeds 256 characters
+	claims := jwt.MapClaims{
+		"sub": strings.Repeat("a", 257),
+		"exp": time.Now().Add(10 * time.Minute).Unix(),
+	}
+	rawToken := mintTestJWT(t, privKey, kid, claims)
+
+	_, err = verifier.Verify(ctx, rawToken)
+	assert.ErrorIs(t, err, ErrInvalidSubject)
+}
+
+func TestHydraTokenVerifier_InvalidSubject_ControlCharacters(t *testing.T) {
+	ctx := context.Background()
+	kid := "test-key-1"
+	privKey, jwksURL, srv, _ := setupTestJWKS(t, kid)
+	defer srv.Close()
+
+	verifier, err := NewHydraTokenVerifier(ctx, jwksURL)
+	require.NoError(t, err)
+	defer verifier.Close()
+
+	testCases := []struct {
+		name    string
+		subject string
+	}{
+		{"newline in sub", "client\nid"},
+		{"carriage return in sub", "client\rid"},
+		{"null byte in sub", "client\x00id"},
+		{"tab in sub", "client\tid"},
+		{"del character in sub", "client\x7fid"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			claims := jwt.MapClaims{
+				"sub": tc.subject,
+				"exp": time.Now().Add(10 * time.Minute).Unix(),
+			}
+			rawToken := mintTestJWT(t, privKey, kid, claims)
+
+			_, err := verifier.Verify(ctx, rawToken)
+			assert.ErrorIs(t, err, ErrInvalidSubject)
+		})
+	}
+}
+
+func TestHydraTokenVerifier_InvalidSubject_NonStringClaim(t *testing.T) {
+	ctx := context.Background()
+	kid := "test-key-1"
+	privKey, jwksURL, srv, _ := setupTestJWKS(t, kid)
+	defer srv.Close()
+
+	verifier, err := NewHydraTokenVerifier(ctx, jwksURL)
+	require.NoError(t, err)
+	defer verifier.Close()
+
+	claims := jwt.MapClaims{
+		"sub":       12345,
+		"client_id": "valid-client",
+		"exp":       time.Now().Add(10 * time.Minute).Unix(),
+	}
+	rawToken := mintTestJWT(t, privKey, kid, claims)
+
+	_, err = verifier.Verify(ctx, rawToken)
+	assert.ErrorIs(t, err, ErrInvalidSubject)
+}
+
+func TestHydraTokenVerifier_ClockSkewTolerance(t *testing.T) {
+	ctx := context.Background()
+	kid := "test-key-1"
+	privKey, jwksURL, srv, _ := setupTestJWKS(t, kid)
+	defer srv.Close()
+
+	// Configure 5s clock skew tolerance
+	verifier, err := NewHydraTokenVerifier(ctx, jwksURL, WithClockSkewTolerance(5*time.Second))
+	require.NoError(t, err)
+	defer verifier.Close()
+
+	// Token with nbf 2s in the future (within 5s clock skew tolerance)
+	validClaims := jwt.MapClaims{
+		"sub": "machine-client",
+		"nbf": time.Now().Add(2 * time.Second).Unix(),
+		"exp": time.Now().Add(10 * time.Minute).Unix(),
+	}
+	validToken := mintTestJWT(t, privKey, kid, validClaims)
+
+	vt, err := verifier.Verify(ctx, validToken)
+	require.NoError(t, err)
+	assert.Equal(t, "machine-client", vt.Subject)
+
+	// Token with nbf 10s in the future (beyond 5s clock skew tolerance)
+	futureClaims := jwt.MapClaims{
+		"sub": "machine-client",
+		"nbf": time.Now().Add(10 * time.Second).Unix(),
+		"exp": time.Now().Add(10 * time.Minute).Unix(),
+	}
+	futureToken := mintTestJWT(t, privKey, kid, futureClaims)
+
+	_, err = verifier.Verify(ctx, futureToken)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, ErrInvalidSignature) // jwt parser wraps nbf errors in ErrTokenNotValidYet, handled as ErrInvalidSignature
+}
+
+func TestHydraTokenVerifier_Close(t *testing.T) {
+	ctx := context.Background()
+	kid := "test-key-1"
+	_, jwksURL, srv, _ := setupTestJWKS(t, kid)
+	defer srv.Close()
+
+	verifier, err := NewHydraTokenVerifier(ctx, jwksURL)
+	require.NoError(t, err)
+
+	err = verifier.Close()
+	assert.NoError(t, err)
+
+	// Calling Close again should be idempotent and safe
+	err = verifier.Close()
+	assert.NoError(t, err)
 }

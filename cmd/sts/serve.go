@@ -211,6 +211,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Stop gRPC Server
 	if grpcSrvWithObs != nil {
 		grpcSrvWithObs.Stop()
+	} else if hydraVerifier != nil {
+		_ = hydraVerifier.Close()
 	}
 
 	obs.Logger.Info("server exiting")

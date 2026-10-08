@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"time"
@@ -20,6 +21,9 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/status"
 )
+
+// MaxTokenSizeBytes is the maximum permitted size in bytes for an incoming upstream token (64 KB).
+const MaxTokenSizeBytes = 65536
 
 // ServerOption configures a gRPC Server.
 type ServerOption func(*Server)
@@ -122,32 +126,49 @@ func (s *Server) ExchangeSession(ctx context.Context, req *stsv1.ExchangeRequest
 
 // ExchangeToken swaps an upstream IdP access token (Ory Hydra OAuth2 Client Credentials) for an internal STS JWT.
 func (s *Server) ExchangeToken(ctx context.Context, req *stsv1.ExchangeTokenRequest) (*stsv1.ExchangeResponse, error) {
-	if s.tokenVerifier == nil {
-		return nil, status.Error(codes.Unimplemented, "token verifier not configured")
+	if req == nil || strings.TrimSpace(req.Token) == "" {
+		s.auditLogExchange(ctx, "", "rejected", "token is required", codes.InvalidArgument, 0)
+		return nil, status.Error(codes.InvalidArgument, "token is required")
 	}
 
-	if req == nil || strings.TrimSpace(req.Token) == "" {
-		return nil, status.Error(codes.InvalidArgument, "token is required")
+	if len(req.Token) > MaxTokenSizeBytes {
+		s.auditLogExchange(ctx, "", "rejected", "token exceeds maximum permitted size of 64 KB", codes.InvalidArgument, 0)
+		return nil, status.Errorf(codes.InvalidArgument, "token exceeds maximum permitted size of %d bytes", MaxTokenSizeBytes)
+	}
+
+	if s.tokenVerifier == nil {
+		s.auditLogExchange(ctx, "", "rejected", "token verifier not configured", codes.Unimplemented, 0)
+		return nil, status.Error(codes.Unimplemented, "token verifier not configured")
 	}
 
 	vt, err := s.tokenVerifier.Verify(ctx, req.Token)
 	if err != nil {
 		if errors.Is(err, auth.ErrEmptyToken) {
+			s.auditLogExchange(ctx, "", "rejected", "token is required", codes.InvalidArgument, 0)
 			return nil, status.Error(codes.InvalidArgument, "token is required")
 		}
 		if errors.Is(err, auth.ErrTokenExpired) {
+			s.auditLogExchange(ctx, "", "rejected", "token is expired", codes.Unauthenticated, 0)
 			return nil, status.Error(codes.Unauthenticated, "token is expired")
 		}
 		if errors.Is(err, auth.ErrTokenExpiringSoon) {
+			s.auditLogExchange(ctx, "", "rejected", "token expiring in less than 60 seconds", codes.Unauthenticated, 0)
 			return nil, status.Error(codes.Unauthenticated, "token expiring in less than 60 seconds")
 		}
 		if errors.Is(err, auth.ErrMissingSubject) {
+			s.auditLogExchange(ctx, "", "rejected", "token missing subject", codes.InvalidArgument, 0)
 			return nil, status.Error(codes.InvalidArgument, "token missing subject")
 		}
+		if errors.Is(err, auth.ErrInvalidSubject) {
+			s.auditLogExchange(ctx, "", "rejected", "token subject is invalid", codes.InvalidArgument, 0)
+			return nil, status.Error(codes.InvalidArgument, "token subject is invalid")
+		}
 		if errors.Is(err, auth.ErrJWKSUnavailable) {
+			s.auditLogExchange(ctx, "", "rejected", "upstream JWKS unavailable", codes.Unavailable, 0)
 			s.logger(ctx).Error("upstream JWKS unavailable", zap.Error(err))
 			return nil, status.Error(codes.Unavailable, "upstream JWKS unavailable")
 		}
+		s.auditLogExchange(ctx, "", "rejected", fmt.Sprintf("invalid token: %v", err), codes.Unauthenticated, 0)
 		s.logger(ctx).Warn("token verification failed", zap.Error(err))
 		return nil, status.Errorf(codes.Unauthenticated, "invalid token: %v", err)
 	}
@@ -155,6 +176,7 @@ func (s *Server) ExchangeToken(ctx context.Context, req *stsv1.ExchangeTokenRequ
 	// Calculate remaining lifetime and enforce clamping
 	remainingSeconds := int(time.Until(vt.ExpiresAt).Seconds())
 	if remainingSeconds < 60 {
+		s.auditLogExchange(ctx, vt.ClientID, "rejected", "token expiring in less than 60 seconds", codes.Unauthenticated, 0)
 		return nil, status.Error(codes.Unauthenticated, "token expiring in less than 60 seconds")
 	}
 
@@ -185,6 +207,7 @@ func (s *Server) ExchangeToken(ctx context.Context, req *stsv1.ExchangeTokenRequ
 		claims,
 	)
 	if err != nil {
+		s.auditLogExchange(ctx, clientID, "rejected", "failed to mint token", codes.Internal, 0)
 		s.logger(ctx).Error("failed to mint token", zap.Error(err))
 		return nil, status.Error(codes.Internal, "failed to mint token")
 	}
@@ -194,10 +217,30 @@ func (s *Server) ExchangeToken(ctx context.Context, req *stsv1.ExchangeTokenRequ
 		s.observability.MetricsProvider.RecordM2MTokenClampedTTL(ctx, float64(clampedExpiry))
 	}
 
+	s.auditLogExchange(ctx, clientID, "success", "", codes.OK, clampedExpiry)
+
 	return &stsv1.ExchangeResponse{
 		AccessToken: token,
 		ExpiresIn:   int64(clampedExpiry),
 	}, nil
+}
+
+func (s *Server) auditLogExchange(ctx context.Context, clientID, outcome, reason string, code codes.Code, clampedTTL int) {
+	fields := []zap.Field{
+		zap.String("event", "sts.m2m.token_exchange"),
+		zap.String("outcome", outcome),
+		zap.String("grpc_code", code.String()),
+	}
+	if clientID != "" {
+		fields = append(fields, zap.String("client_id", clientID))
+	}
+	if reason != "" {
+		fields = append(fields, zap.String("reason", reason))
+	}
+	if clampedTTL > 0 {
+		fields = append(fields, zap.Int("clamped_ttl_seconds", clampedTTL))
+	}
+	s.logger(ctx).Info("security audit: m2m token exchange", fields...)
 }
 
 // RevokeUserSessions invalidates all sessions for a user.
@@ -280,9 +323,12 @@ func (s *Server) StartWithInterceptors(port string) error {
 	return s.server.Serve(listener)
 }
 
-// Stop gracefully stops the gRPC server.
+// Stop gracefully stops the gRPC server and cleans up verifier resources.
 func (s *Server) Stop() {
 	if s.server != nil {
 		s.server.GracefulStop()
+	}
+	if closer, ok := s.tokenVerifier.(io.Closer); ok && closer != nil {
+		_ = closer.Close()
 	}
 }

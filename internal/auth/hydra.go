@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lestrrat-go/jwx/v2/jwk"
@@ -26,6 +27,8 @@ var (
 	ErrInvalidSignature = errors.New("invalid token signature")
 	// ErrMissingSubject is returned when the token lacks both sub and client_id claims.
 	ErrMissingSubject = errors.New("token missing subject")
+	// ErrInvalidSubject is returned when the extracted subject or client_id exceeds 256 characters or contains control characters/newlines.
+	ErrInvalidSubject = errors.New("token subject is invalid")
 	// ErrJWKSUnavailable is returned when upstream JWKS cannot be retrieved.
 	ErrJWKSUnavailable = errors.New("upstream JWKS unavailable")
 	// ErrKeyNotFound is returned when the signing key ID (kid) is not present in the upstream JWKS.
@@ -47,6 +50,24 @@ type TokenVerifier interface {
 	Verify(ctx context.Context, tokenString string) (*VerifiedToken, error)
 }
 
+// HydraTokenVerifier verifies upstream OAuth2 Client Credentials tokens using Ory Hydra's JWKS.
+type HydraTokenVerifier struct {
+	jwksURL            string
+	cache              *jwk.Cache
+	staticKeySet       jwk.Set
+	expectedIssuer     string
+	cancel             context.CancelFunc
+	clockSkewTolerance time.Duration
+}
+
+// Close stops the background JWKS caching routine and releases associated resources.
+func (v *HydraTokenVerifier) Close() error {
+	if v.cancel != nil {
+		v.cancel()
+	}
+	return nil
+}
+
 // verifierConfig holds internal options for HydraTokenVerifier.
 type verifierConfig struct {
 	refreshInterval    time.Duration
@@ -54,6 +75,7 @@ type verifierConfig struct {
 	httpClient         *http.Client
 	expectedIssuer     string
 	staticKeySet       jwk.Set
+	clockSkewTolerance time.Duration
 }
 
 // VerifierOption configures a HydraTokenVerifier.
@@ -94,12 +116,11 @@ func WithStaticKeySet(set jwk.Set) VerifierOption {
 	}
 }
 
-// HydraTokenVerifier verifies upstream OAuth2 Client Credentials tokens using Ory Hydra's JWKS.
-type HydraTokenVerifier struct {
-	jwksURL        string
-	cache          *jwk.Cache
-	staticKeySet   jwk.Set
-	expectedIssuer string
+// WithClockSkewTolerance sets the clock skew leeway duration for validating timestamps.
+func WithClockSkewTolerance(d time.Duration) VerifierOption {
+	return func(c *verifierConfig) {
+		c.clockSkewTolerance = d
+	}
 }
 
 // NewHydraTokenVerifier creates and initializes a new HydraTokenVerifier with preemptive JWKS caching.
@@ -107,15 +128,20 @@ func NewHydraTokenVerifier(ctx context.Context, jwksURL string, opts ...Verifier
 	cfg := &verifierConfig{
 		refreshInterval:    10 * time.Minute,
 		minRefreshInterval: 1 * time.Minute,
+		clockSkewTolerance: 5 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(cfg)
 	}
 
+	cacheCtx, cancel := context.WithCancel(ctx)
+
 	verifier := &HydraTokenVerifier{
-		jwksURL:        jwksURL,
-		expectedIssuer: cfg.expectedIssuer,
-		staticKeySet:   cfg.staticKeySet,
+		jwksURL:            jwksURL,
+		expectedIssuer:     cfg.expectedIssuer,
+		staticKeySet:       cfg.staticKeySet,
+		cancel:             cancel,
+		clockSkewTolerance: cfg.clockSkewTolerance,
 	}
 
 	// If a static key set is provided, we skip remote cache initialization.
@@ -124,6 +150,7 @@ func NewHydraTokenVerifier(ctx context.Context, jwksURL string, opts ...Verifier
 	}
 
 	if jwksURL == "" {
+		cancel()
 		return nil, fmt.Errorf("jwksURL is required when no static key set is provided")
 	}
 
@@ -131,7 +158,7 @@ func NewHydraTokenVerifier(ctx context.Context, jwksURL string, opts ...Verifier
 	if refreshWindow < 1*time.Second {
 		refreshWindow = 1 * time.Second
 	}
-	c := jwk.NewCache(ctx, jwk.WithRefreshWindow(refreshWindow))
+	c := jwk.NewCache(cacheCtx, jwk.WithRefreshWindow(refreshWindow))
 	regOpts := []jwk.RegisterOption{
 		jwk.WithRefreshInterval(cfg.refreshInterval),
 		jwk.WithMinRefreshInterval(cfg.minRefreshInterval),
@@ -141,11 +168,12 @@ func NewHydraTokenVerifier(ctx context.Context, jwksURL string, opts ...Verifier
 	}
 
 	if err := c.Register(jwksURL, regOpts...); err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to register JWKS URL with cache: %w", err)
 	}
 
 	// Preemptively fetch the JWKS on startup to avoid request-time latency
-	_, _ = c.Refresh(ctx, jwksURL)
+	_, _ = c.Refresh(cacheCtx, jwksURL)
 
 	verifier.cache = c
 	return verifier, nil
@@ -166,6 +194,20 @@ func (v *HydraTokenVerifier) getKeySet(ctx context.Context) (jwk.Set, error) {
 	return set, nil
 }
 
+const maxSubjectLength = 256
+
+func isValidSubject(s string) bool {
+	if len(s) == 0 || len(s) > maxSubjectLength {
+		return false
+	}
+	for _, r := range s {
+		if r < 32 || r == 127 || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
 // Verify validates the incoming upstream JWT: signature against Hydra JWKS, expiration, and subject.
 func (v *HydraTokenVerifier) Verify(ctx context.Context, tokenString string) (*VerifiedToken, error) {
 	if strings.TrimSpace(tokenString) == "" {
@@ -178,7 +220,8 @@ func (v *HydraTokenVerifier) Verify(ctx context.Context, tokenString string) (*V
 	}
 
 	claims := jwt.MapClaims{}
-	token, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
+	parser := jwt.NewParser(jwt.WithLeeway(v.clockSkewTolerance))
+	token, err := parser.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (interface{}, error) {
 		kidVal, ok := t.Header["kid"]
 		if !ok {
 			return nil, fmt.Errorf("missing kid in token header")
@@ -242,9 +285,22 @@ func (v *HydraTokenVerifier) Verify(ctx context.Context, tokenString string) (*V
 		return nil, ErrTokenExpiringSoon
 	}
 
-	// Extract subject and client_id
+	// Extract and validate subject and client_id
+	var clientID string
+	if rawCID, ok := claims["client_id"]; ok && rawCID != nil {
+		cidStr, isStr := rawCID.(string)
+		if !isStr {
+			return nil, ErrInvalidSubject
+		}
+		clientID = cidStr
+	}
+
 	sub, _ := claims.GetSubject()
-	clientID, _ := claims["client_id"].(string)
+	if rawSub, ok := claims["sub"]; ok && rawSub != nil {
+		if _, isStr := rawSub.(string); !isStr {
+			return nil, ErrInvalidSubject
+		}
+	}
 
 	if sub == "" && clientID != "" {
 		sub = clientID
@@ -254,6 +310,10 @@ func (v *HydraTokenVerifier) Verify(ctx context.Context, tokenString string) (*V
 
 	if sub == "" {
 		return nil, ErrMissingSubject
+	}
+
+	if !isValidSubject(sub) || !isValidSubject(clientID) {
+		return nil, ErrInvalidSubject
 	}
 
 	return &VerifiedToken{
