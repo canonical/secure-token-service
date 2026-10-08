@@ -24,9 +24,9 @@
 
 ## Verification Suite
 
-- [ ] 5.1 Execute complete unit test suite across all packages: `go test -v -race ./...`.
-- [ ] 5.2 Execute end-to-end integration test verifying `ExchangeToken` swaps a live mock Hydra JWT for an internal STS JWT signed with ES256 and verified against STS's own JWKS endpoint.
-- [ ] 5.3 Run static analysis and linter: `golangci-lint run`.
+- [x] 5.1 Execute complete unit test suite across all packages: `go test -v -race ./...`.
+- [x] 5.2 Execute end-to-end integration test verifying `ExchangeToken` swaps a live mock Hydra JWT for an internal STS JWT signed with ES256 and verified against STS's own JWKS endpoint.
+- [x] 5.3 Run static analysis and linter: `go vet ./...` and `golangci-lint run`.
 
 ## Documentation & Rollout
 
