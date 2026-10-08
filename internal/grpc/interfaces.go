@@ -9,6 +9,7 @@ package grpcserver
 import (
 	"context"
 
+	"github.com/canonical/secure-token-service/internal/auth"
 	"github.com/canonical/secure-token-service/internal/session"
 )
 
@@ -26,4 +27,9 @@ type SessionStore interface {
 // KeyManager defines the interface for JWT key management
 type KeyManager interface {
 	MintToken(subject, issuer, audience string, expirySeconds int, claims map[string]interface{}) (string, error)
+}
+
+// TokenVerifier defines the interface for verifying upstream IdP tokens
+type TokenVerifier interface {
+	Verify(ctx context.Context, tokenString string) (*auth.VerifiedToken, error)
 }

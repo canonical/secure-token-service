@@ -12,9 +12,9 @@
 
 ## 3. gRPC Server Token Exchange Implementation
 
-- [ ] 3.1 Implement `ExchangeToken` in `internal/grpc/server.go`. Wire `HydraTokenVerifier` into `Server` initialization and server shutdown lifecycle. Enforce maximum token size limit (64 KB) returning `InvalidArgument`. Verify with unit tests in `internal/grpc/server_test.go` for all status code paths (`OK`, `InvalidArgument`, `Unauthenticated`).
-- [ ] 3.2 Implement machine claims mapping (`sub: client_id`, synthetic `email: client_id@serviceaccount.local`), claim sanitation (non-empty, <=256 chars, no control chars/newlines), and TTL clamping (`min(configured_expiry, remaining_upstream_validity)`). Verify claims and clamped expiration via unit tests decoding the minted JWT.
-- [ ] 3.3 Wire verifier and server initialization into `cmd/sts/serve.go`. Verify server starts cleanly with `go test ./cmd/sts/...`.
+- [x] 3.1 Implement `ExchangeToken` in `internal/grpc/server.go`. Wire `HydraTokenVerifier` into `Server` initialization and server shutdown lifecycle. Enforce maximum token size limit (64 KB) returning `InvalidArgument`. Verify with unit tests in `internal/grpc/server_test.go` for all status code paths (`OK`, `InvalidArgument`, `Unauthenticated`).
+- [x] 3.2 Implement machine claims mapping (`sub: client_id`, synthetic `email: client_id@serviceaccount.local`), claim sanitation (non-empty, <=256 chars, no control chars/newlines), and TTL clamping (`min(configured_expiry, remaining_upstream_validity)`). Verify claims and clamped expiration via unit tests decoding the minted JWT.
+- [x] 3.3 Wire verifier and server initialization into `cmd/sts/serve.go`. Verify server starts cleanly with `go test ./cmd/sts/...`.
 
 ## 4. Observability, Telemetry & Documentation
 
