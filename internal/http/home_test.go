@@ -3,7 +3,7 @@
 
 package httpserver
 
-//go:generate mockgen -build_flags=--mod=mod -package httpserver -destination ./mock_interfaces.go github.com/canonical/secure-token-service/internal/http AuthCookieManager,KeyManager,OIDCProvider
+//go:generate mockgen -build_flags=--mod=mod -package httpserver -destination ./mock_interfaces.go github.com/canonical/secure-token-service/internal/http AuthCookieManager,KeyManager,OIDCProvider,OpenIDProvider
 //go:generate mockgen -build_flags=--mod=mod -package httpserver -destination ./mock_store.go -source=../session/store.go
 
 import (
@@ -268,9 +268,9 @@ func TestHandleHome_TokenMasking(t *testing.T) {
 
 	body := w.Body.String()
 
-	// Verify tokens are masked (last 10 chars shown for long tokens)
-	if !strings.Contains(body, "...1234567890") {
-		t.Error("Expected long access token to be masked with last 10 chars")
+	// Verify tokens are masked (first 4 and last 4 chars shown for long tokens)
+	if !strings.Contains(body, "this...7890") {
+		t.Error("Expected long access token to be masked with first 4 and last 4 chars")
 	}
 
 	// Short tokens should show as ***
@@ -438,7 +438,10 @@ func TestRenderUnauthenticatedHome(t *testing.T) {
 		"<!DOCTYPE html>",
 		"Secure Token Service",
 		"/auth/login",
-		"Log In",
+		"/auth/login?provider=oidc",
+		"/auth/login?provider=openid",
+		"Log In with OIDC",
+		"Log In with Ubuntu One",
 		"🔐",
 	}
 
@@ -502,6 +505,60 @@ func TestRenderAuthenticatedHome(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderAuthenticatedHome_OpenID tests authenticated home page rendering with OpenID 2.0 session
+func TestRenderAuthenticatedHome_OpenID(t *testing.T) {
+	testSession := &session.Session{
+		SessionID: "openid-session-456",
+		UserID:    "alice@ubuntu.com",
+		Provider:  "openid",
+		Claims: map[string]interface{}{
+			"email":    "alice@ubuntu.com",
+			"nickname": "alice",
+			"fullname": "Alice Canonical",
+		},
+		AccessToken:  "", // OpenID 2.0 has no OAuth2 tokens
+		IDToken:      "",
+		RefreshToken: "",
+		ExpiresAt:    time.Now().Add(2 * time.Hour),
+		CreatedAt:    time.Now().Add(-10 * time.Minute),
+	}
+
+	w := httptest.NewRecorder()
+	renderAuthenticatedHome(w, testSession)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, resp.StatusCode)
+	}
+
+	body := w.Body.String()
+	expectedStrings := []string{
+		"<!DOCTYPE html>",
+		"Session Information",
+		"alice@ubuntu.com",
+		"openid-session-456",
+		"Ubuntu One (OpenID 2.0)",
+		"provider-openid",
+		"Normalized Claims",
+		"alice@ubuntu.com",
+		"alice",
+		"Alice Canonical",
+		"N/A", // Tokens show as N/A
+		"/auth/login?provider=oidc",
+		"/auth/login?provider=openid",
+		"/auth/logout",
+	}
+
+	for _, expected := range expectedStrings {
+		if !strings.Contains(body, expected) {
+			t.Errorf("Expected HTML to contain '%s'", expected)
+		}
+	}
+}
+
 
 // TestGetStatusClass tests the getStatusClass helper function
 func TestGetStatusClass(t *testing.T) {
@@ -613,3 +670,26 @@ func TestHandleHome_ContextPropagation(t *testing.T) {
 
 	server.handleHome(w, req)
 }
+
+// TestGetProviderDisplayName tests the getProviderDisplayName helper function
+func TestGetProviderDisplayName(t *testing.T) {
+	tests := []struct {
+		provider string
+		expected string
+	}{
+		{"openid", "Ubuntu One (OpenID 2.0)"},
+		{"oidc", "OpenID Connect (OIDC)"},
+		{"", "OIDC"},
+		{"custom", "custom"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			got := getProviderDisplayName(tt.provider)
+			if got != tt.expected {
+				t.Errorf("getProviderDisplayName(%q) = %q, expected %q", tt.provider, got, tt.expected)
+			}
+		})
+	}
+}
+

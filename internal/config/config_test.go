@@ -105,6 +105,15 @@ func TestLoad_Defaults(t *testing.T) {
 	if len(cfg.AllowedReturnToHosts) != 0 {
 		t.Errorf("AllowedReturnToHosts = %v, want empty slice", cfg.AllowedReturnToHosts)
 	}
+	if cfg.UbuntuOneOpenIDURL != "https://login.ubuntu.com/+openid" {
+		t.Errorf("UbuntuOneOpenIDURL = %s, want https://login.ubuntu.com/+openid", cfg.UbuntuOneOpenIDURL)
+	}
+	if cfg.UbuntuOneRealm != "" {
+		t.Errorf("UbuntuOneRealm = %s, want empty string", cfg.UbuntuOneRealm)
+	}
+	if cfg.DefaultAuthProvider != "oidc" {
+		t.Errorf("DefaultAuthProvider = %s, want oidc", cfg.DefaultAuthProvider)
+	}
 }
 
 func TestLoad_CustomValues(t *testing.T) {
@@ -130,12 +139,18 @@ func TestLoad_CustomValues(t *testing.T) {
 	os.Setenv("METRICS_ENABLED", "false")
 	os.Setenv("TRACING_ENABLED", "false")
 	os.Setenv("ALLOWED_RETURN_TO_HOSTS", "app1.example.com,app2.example.com")
+	os.Setenv("UBUNTU_ONE_OPENID_URL", "https://custom.login.ubuntu.com/+openid")
+	os.Setenv("UBUNTU_ONE_REALM", "https://app.example.com")
+	os.Setenv("DEFAULT_AUTH_PROVIDER", "openid")
 	defer func() {
 		os.Unsetenv("OIDC_PROVIDER_URL")
 		os.Unsetenv("OIDC_CLIENT_ID")
 		os.Unsetenv("OIDC_CLIENT_SECRET")
 		os.Unsetenv("OIDC_REDIRECT_URL")
 		os.Unsetenv("ALLOWED_RETURN_TO_HOSTS")
+		os.Unsetenv("UBUNTU_ONE_OPENID_URL")
+		os.Unsetenv("UBUNTU_ONE_REALM")
+		os.Unsetenv("DEFAULT_AUTH_PROVIDER")
 		os.Unsetenv("HTTP_PORT")
 		os.Unsetenv("GRPC_PORT")
 		os.Unsetenv("JWT_ISSUER")
@@ -206,6 +221,15 @@ func TestLoad_CustomValues(t *testing.T) {
 	}
 	if cfg.TracingEnabled != false {
 		t.Errorf("TracingEnabled = %t, want false", cfg.TracingEnabled)
+	}
+	if cfg.UbuntuOneOpenIDURL != "https://custom.login.ubuntu.com/+openid" {
+		t.Errorf("UbuntuOneOpenIDURL = %s, want https://custom.login.ubuntu.com/+openid", cfg.UbuntuOneOpenIDURL)
+	}
+	if cfg.UbuntuOneRealm != "https://app.example.com" {
+		t.Errorf("UbuntuOneRealm = %s, want https://app.example.com", cfg.UbuntuOneRealm)
+	}
+	if cfg.DefaultAuthProvider != "openid" {
+		t.Errorf("DefaultAuthProvider = %s, want openid", cfg.DefaultAuthProvider)
 	}
 }
 

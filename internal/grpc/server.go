@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 
 	stsv1 "github.com/canonical/secure-token-service/api/proto/v1"
 	"github.com/canonical/secure-token-service/internal/observability"
@@ -30,17 +31,14 @@ type Server struct {
 	server        *grpc.Server
 }
 
+var fallbackLogger = zap.NewNop()
+
 // logger returns the zap logger from observability, or creates a new one if not available
 func (s *Server) logger(ctx context.Context) *zap.Logger {
 	if s.observability != nil && s.observability.Logger != nil {
 		return s.observability.Logger.FromContext(ctx)
 	}
-	// Return a new logger if observability is not set up
-	logger, err := observability.NewLogger("info", false)
-	if err != nil {
-		return zap.NewNop()
-	}
-	return logger.Logger
+	return fallbackLogger
 }
 
 // NewServer creates a new gRPC server.
@@ -71,15 +69,21 @@ func (s *Server) ExchangeSession(ctx context.Context, req *stsv1.ExchangeRequest
 	// Get session from store
 	sess, err := s.sessionStore.Get(ctx, sessionID)
 	if err != nil {
-		s.logger(ctx).Error("failed to get session",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+		s.logger(ctx).Error("failed to get session", zap.Error(err))
 		return nil, status.Error(codes.NotFound, "session not found")
 	}
 
-	// TODO: Add custom claims from session/user profile
-	claims := map[string]interface{}{
-		"email": sess.UserID,
+	// Merge session claims while ensuring primary identity is preserved
+	claims := make(map[string]interface{})
+	for k, v := range sess.Claims {
+		claims[k] = v
+	}
+	if strings.Contains(sess.UserID, "@") {
+		claims["email"] = sess.UserID
+	} else if emailVal, ok := sess.Claims["email"].(string); ok && emailVal != "" {
+		claims["email"] = emailVal
+	} else {
+		claims["email"] = sess.UserID
 	}
 
 	// Mint internal JWT

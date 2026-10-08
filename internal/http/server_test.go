@@ -8,12 +8,16 @@ package httpserver
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/canonical/secure-token-service/internal/auth/openid"
+	"github.com/canonical/secure-token-service/internal/cookie"
+	"github.com/canonical/secure-token-service/internal/session"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"go.uber.org/mock/gomock"
 )
@@ -287,7 +291,7 @@ func TestIsValidReturnTo(t *testing.T) {
 
 // TestHandleLogin tests the login handler
 func TestHandleLogin(t *testing.T) {
-	t.Run("Valid return_to -> 302 to IdP", func(t *testing.T) {
+	t.Run("Valid return_to -> 302 to IdP (default OIDC)", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
@@ -297,7 +301,7 @@ func TestHandleLogin(t *testing.T) {
 		server := NewServer(nil, nil, cookieManager, oidcProvider, nil)
 
 		cookieManager.EXPECT().
-			SetOIDCState(gomock.Any(), gomock.Any(), "/dashboard").
+			SetAuthState(gomock.Any(), gomock.Any(), cookie.AuthState{ReturnTo: "/dashboard", Provider: "oidc"}).
 			Return("mock-state-123", nil)
 
 		cookieManager.EXPECT().
@@ -323,6 +327,184 @@ func TestHandleLogin(t *testing.T) {
 		}
 	})
 
+	t.Run("Explicit provider=oidc -> 302 to OIDC IdP", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		oidcProvider := NewMockOIDCProvider(ctrl)
+
+		server := NewServer(nil, nil, cookieManager, oidcProvider, nil)
+
+		cookieManager.EXPECT().
+			SetAuthState(gomock.Any(), gomock.Any(), cookie.AuthState{ReturnTo: "/dashboard", Provider: "oidc"}).
+			Return("mock-state-123", nil)
+
+		cookieManager.EXPECT().
+			SetOIDCNonce(gomock.Any(), gomock.Any()).
+			Return("mock-nonce-456", nil)
+
+		oidcProvider.EXPECT().
+			AuthCodeURL("mock-state-123", gomock.Any()).
+			Return("https://idp.example.com/auth?state=mock-state-123")
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/login?provider=oidc&return_to=/dashboard", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusFound {
+			t.Errorf("Expected status 302 (redirect), got %d", w.Code)
+		}
+	})
+
+	t.Run("Explicit provider=openid -> 302 to OpenID IdP", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+
+		server := NewServer(nil, nil, cookieManager, nil, nil, WithOpenIDProvider(openIDProvider))
+
+		cookieManager.EXPECT().
+			SetAuthState(gomock.Any(), gomock.Any(), cookie.AuthState{ReturnTo: "/dashboard", Provider: "openid"}).
+			Return("mock-openid-state", nil)
+
+		openIDProvider.EXPECT().
+			BuildAuthURL("http://localhost:8080/auth/openid/callback", "mock-openid-state").
+			Return("https://login.ubuntu.com/+openid?openid.ns=...", nil)
+
+		req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/auth/login?provider=openid&return_to=/dashboard", nil)
+		req.Host = "localhost:8080"
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusFound {
+			t.Errorf("Expected status 302 (redirect), got %d", w.Code)
+		}
+		location := w.Header().Get("Location")
+		if !strings.HasPrefix(location, "https://login.ubuntu.com/+openid") {
+			t.Errorf("Expected OpenID redirect location, got %s", location)
+		}
+	})
+
+	t.Run("OpenID with X-Forwarded-Proto https builds https callback URL", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+
+		server := NewServer(nil, nil, cookieManager, nil, nil, WithOpenIDProvider(openIDProvider))
+
+		cookieManager.EXPECT().
+			SetAuthState(gomock.Any(), gomock.Any(), cookie.AuthState{ReturnTo: "/dashboard", Provider: "openid"}).
+			Return("mock-openid-state", nil)
+
+		openIDProvider.EXPECT().
+			BuildAuthURL("https://example.com/auth/openid/callback", "mock-openid-state").
+			Return("https://login.ubuntu.com/+openid?openid.ns=...", nil)
+
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/auth/login?provider=openid&return_to=/dashboard", nil)
+		req.Host = "example.com"
+		req.Header.Set("X-Forwarded-Proto", "https")
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusFound {
+			t.Errorf("Expected status 302 (redirect), got %d", w.Code)
+		}
+	})
+
+	t.Run("Default provider configured as openid", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+
+		server := NewServer(nil, nil, cookieManager, nil, nil,
+			WithOpenIDProvider(openIDProvider),
+			WithDefaultAuthProvider("openid"),
+		)
+
+		cookieManager.EXPECT().
+			SetAuthState(gomock.Any(), gomock.Any(), cookie.AuthState{ReturnTo: "/dashboard", Provider: "openid"}).
+			Return("mock-openid-state", nil)
+
+		openIDProvider.EXPECT().
+			BuildAuthURL("http://localhost:8080/auth/openid/callback", "mock-openid-state").
+			Return("https://login.ubuntu.com/+openid?openid.ns=...", nil)
+
+		// No provider query param -> uses defaultProvider ("openid")
+		req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/auth/login?return_to=/dashboard", nil)
+		req.Host = "localhost:8080"
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusFound {
+			t.Errorf("Expected status 302, got %d", w.Code)
+		}
+	})
+
+	t.Run("OpenID requested but provider not configured -> 500", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		server := NewServer(nil, nil, cookieManager, nil, nil) // no openIDProvider
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/login?provider=openid&return_to=/dashboard", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("Expected status 500, got %d", w.Code)
+		}
+	})
+
+	t.Run("OIDC requested but provider not configured -> 500", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		server := NewServer(nil, nil, cookieManager, nil, nil) // no oidcProvider
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/login?provider=oidc&return_to=/dashboard", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("Expected status 500, got %d", w.Code)
+		}
+	})
+
+	t.Run("Unsupported provider -> 400 Bad Request", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		server := NewServer(nil, nil, cookieManager, nil, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/login?provider=saml&return_to=/dashboard", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Unsupported provider") {
+			t.Errorf("Expected 'Unsupported provider', got %s", w.Body.String())
+		}
+	})
+
 	t.Run("Valid same-origin return_to -> 302 to IdP", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
@@ -333,7 +515,7 @@ func TestHandleLogin(t *testing.T) {
 		server := NewServer(nil, nil, cookieManager, oidcProvider, nil)
 
 		cookieManager.EXPECT().
-			SetOIDCState(gomock.Any(), gomock.Any(), "http://localhost:8080/dashboard").
+			SetAuthState(gomock.Any(), gomock.Any(), cookie.AuthState{ReturnTo: "http://localhost:8080/dashboard", Provider: "oidc"}).
 			Return("mock-state-123", nil)
 
 		cookieManager.EXPECT().
@@ -370,7 +552,7 @@ func TestHandleLogin(t *testing.T) {
 		server := NewServer(nil, nil, cookieManager, oidcProvider, nil, WithAllowedHosts([]string{"allowed.example.com"}))
 
 		cookieManager.EXPECT().
-			SetOIDCState(gomock.Any(), gomock.Any(), "https://allowed.example.com/app").
+			SetAuthState(gomock.Any(), gomock.Any(), cookie.AuthState{ReturnTo: "https://allowed.example.com/app", Provider: "oidc"}).
 			Return("mock-state-123", nil)
 
 		cookieManager.EXPECT().
@@ -407,7 +589,7 @@ func TestHandleLogin(t *testing.T) {
 		server := NewServer(nil, nil, cookieManager, oidcProvider, nil)
 
 		cookieManager.EXPECT().
-			SetOIDCState(gomock.Any(), gomock.Any(), "/").
+			SetAuthState(gomock.Any(), gomock.Any(), cookie.AuthState{ReturnTo: "/", Provider: "oidc"}).
 			Return("mock-state-123", nil)
 
 		cookieManager.EXPECT().
@@ -470,7 +652,7 @@ func TestHandleLogin(t *testing.T) {
 // setupCallbackSuccessMocks configures mocks for a successful callback flow up to redirect
 func setupCallbackSuccessMocks(
 	ctrl *gomock.Controller,
-	stateData map[string]string,
+	stateData *cookie.AuthState,
 	reqHost string,
 	opts ...ServerOption,
 ) (*Server, *http.Request, *httptest.ResponseRecorder) {
@@ -483,11 +665,11 @@ func setupCallbackSuccessMocks(
 	server := NewServer(store, nil, cookieManager, oidcProvider, nil, opts...)
 
 	cookieManager.EXPECT().
-		GetOIDCState(gomock.Any()).
+		GetAuthState(gomock.Any()).
 		Return(stateData, nil)
 
 	cookieManager.EXPECT().
-		ClearOIDCState(gomock.Any(), gomock.Any())
+		ClearAuthState(gomock.Any(), gomock.Any())
 
 	oidcProvider.EXPECT().
 		Exchange(gomock.Any(), "mock-code").
@@ -534,8 +716,8 @@ func setupCallbackSuccessMocks(
 		Return(nil)
 
 	cookieManager.EXPECT().
-		Encode("session_id", gomock.Any()).
-		Return("mock-encoded-session", nil)
+		SetSessionCookie(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil)
 
 	reqURL := "/auth/callback?state=mock-state-123&code=mock-code"
 	if reqHost != "" {
@@ -556,9 +738,10 @@ func TestHandleCallback(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		stateData := map[string]string{
-			"state":     "mock-state-123",
-			"return_to": "/dashboard",
+		stateData := &cookie.AuthState{
+			State:    "mock-state-123",
+			ReturnTo: "/dashboard",
+			Provider: "oidc",
 		}
 		server, req, w := setupCallbackSuccessMocks(ctrl, stateData, "localhost:8080")
 
@@ -577,8 +760,9 @@ func TestHandleCallback(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		stateData := map[string]string{
-			"state": "mock-state-123",
+		stateData := &cookie.AuthState{
+			State:    "mock-state-123",
+			Provider: "oidc",
 		}
 		server, req, w := setupCallbackSuccessMocks(ctrl, stateData, "localhost:8080")
 
@@ -597,9 +781,10 @@ func TestHandleCallback(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		stateData := map[string]string{
-			"state":     "mock-state-123",
-			"return_to": "http://localhost:8080/dashboard",
+		stateData := &cookie.AuthState{
+			State:    "mock-state-123",
+			ReturnTo: "http://localhost:8080/dashboard",
+			Provider: "oidc",
 		}
 		server, req, w := setupCallbackSuccessMocks(ctrl, stateData, "localhost:8080")
 
@@ -618,9 +803,10 @@ func TestHandleCallback(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
-		stateData := map[string]string{
-			"state":     "mock-state-123",
-			"return_to": "https://allowed.example.com/app",
+		stateData := &cookie.AuthState{
+			State:    "mock-state-123",
+			ReturnTo: "https://allowed.example.com/app",
+			Provider: "oidc",
 		}
 		server, req, w := setupCallbackSuccessMocks(ctrl, stateData, "localhost:8080", WithAllowedHosts([]string{"allowed.example.com"}))
 
@@ -647,9 +833,10 @@ func TestHandleCallback(t *testing.T) {
 				ctrl := gomock.NewController(t)
 				defer ctrl.Finish()
 
-				stateData := map[string]string{
-					"state":     "mock-state-123",
-					"return_to": target,
+				stateData := &cookie.AuthState{
+					State:    "mock-state-123",
+					ReturnTo: target,
+					Provider: "oidc",
 				}
 				server, req, w := setupCallbackSuccessMocks(ctrl, stateData, "localhost:8080")
 
@@ -674,11 +861,8 @@ func TestHandleCallback(t *testing.T) {
 		server := NewServer(nil, nil, cookieManager, nil, nil)
 
 		cookieManager.EXPECT().
-			GetOIDCState(gomock.Any()).
-			Return(map[string]string{"state": "expected-state"}, nil)
-
-		cookieManager.EXPECT().
-			ClearOIDCState(gomock.Any(), gomock.Any())
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "expected-state", Provider: "oidc"}, nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=wrong-state&code=mock-code", nil)
 		w := httptest.NewRecorder()
@@ -690,6 +874,30 @@ func TestHandleCallback(t *testing.T) {
 		}
 		if !strings.Contains(w.Body.String(), "State mismatch") {
 			t.Errorf("Expected 'State mismatch', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("Provider mismatch -> 400 Bad Request", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		server := NewServer(nil, nil, cookieManager, nil, nil)
+
+		cookieManager.EXPECT().
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "mock-state", Provider: "openid"}, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=mock-state&code=mock-code", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Provider mismatch") {
+			t.Errorf("Expected 'Provider mismatch', got %s", w.Body.String())
 		}
 	})
 
@@ -705,11 +913,11 @@ func TestHandleCallback(t *testing.T) {
 		server := NewServer(nil, nil, cookieManager, oidcProvider, nil)
 
 		cookieManager.EXPECT().
-			GetOIDCState(gomock.Any()).
-			Return(map[string]string{"state": "mock-state"}, nil)
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "mock-state", Provider: "oidc"}, nil)
 
 		cookieManager.EXPECT().
-			ClearOIDCState(gomock.Any(), gomock.Any())
+			ClearAuthState(gomock.Any(), gomock.Any())
 
 		oidcProvider.EXPECT().
 			Exchange(gomock.Any(), "mock-code").
@@ -755,11 +963,11 @@ func TestHandleCallback(t *testing.T) {
 		server := NewServer(nil, nil, cookieManager, nil, nil)
 
 		cookieManager.EXPECT().
-			GetOIDCState(gomock.Any()).
-			Return(map[string]string{"state": "mock-state"}, nil)
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "mock-state", Provider: "oidc"}, nil)
 
 		cookieManager.EXPECT().
-			ClearOIDCState(gomock.Any(), gomock.Any())
+			ClearAuthState(gomock.Any(), gomock.Any())
 
 		req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=mock-state", nil)
 		w := httptest.NewRecorder()
@@ -771,6 +979,308 @@ func TestHandleCallback(t *testing.T) {
 		}
 		if !strings.Contains(w.Body.String(), "Missing code") {
 			t.Errorf("Expected 'Missing code', got %s", w.Body.String())
+		}
+	})
+}
+
+// TestHandleOpenIDCallback tests the OpenID callback handler
+func TestHandleOpenIDCallback(t *testing.T) {
+	t.Run("Valid OpenID callback -> 302 redirect to return_to", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+		store := NewMockStore(ctrl)
+
+		server := NewServer(store, nil, cookieManager, nil, nil, WithOpenIDProvider(openIDProvider))
+
+		cookieManager.EXPECT().
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "mock-openid-state", ReturnTo: "/dashboard", Provider: "openid"}, nil)
+
+		cookieManager.EXPECT().
+			ClearAuthState(gomock.Any(), gomock.Any())
+
+		mockClaims := &openid.Claims{
+			ClaimedID: "https://login.ubuntu.com/+id/user123",
+			Email:     "testuser@example.com",
+			FullName:  "Test User",
+			Nickname:  "testuser",
+		}
+
+		openIDProvider.EXPECT().
+			VerifyCallback(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(mockClaims, nil)
+
+		store.EXPECT().
+			Set(gomock.Any(), gomock.Cond(func(x any) bool {
+				s, ok := x.(*session.Session)
+				if !ok {
+					return false
+				}
+				return s.UserID == "testuser@example.com" &&
+					s.Provider == "openid" &&
+					s.Claims["email"] == "testuser@example.com" &&
+					s.Claims["name"] == "Test User"
+			})).
+			Return(nil)
+
+		cookieManager.EXPECT().
+			SetSessionCookie(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=mock-openid-state&openid.mode=id_res", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusFound {
+			t.Errorf("Expected status 302, got %d", w.Code)
+		}
+		if loc := w.Header().Get("Location"); loc != "/dashboard" {
+			t.Errorf("Expected redirect to /dashboard, got %s", loc)
+		}
+	})
+
+	t.Run("User cancelled (openid.mode=cancel) -> 400 Bad Request", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		server := NewServer(nil, nil, nil, nil, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?openid.mode=cancel", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Login cancelled") {
+			t.Errorf("Expected 'Login cancelled', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("Error parameter present -> 400 Bad Request", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		server := NewServer(nil, nil, nil, nil, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?error=access_denied", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+	})
+
+	t.Run("OpenID provider not configured -> 500", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		server := NewServer(nil, nil, nil, nil, nil) // no openIDProvider
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=test", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Errorf("Expected status 500, got %d", w.Code)
+		}
+	})
+
+	t.Run("State verification fails -> 400 Bad Request", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+
+		server := NewServer(nil, nil, cookieManager, nil, nil, WithOpenIDProvider(openIDProvider))
+
+		cookieManager.EXPECT().
+			GetAuthState(gomock.Any()).
+			Return(nil, http.ErrNoCookie)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=test", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+	})
+
+	t.Run("State mismatch -> 400 Bad Request", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+
+		server := NewServer(nil, nil, cookieManager, nil, nil, WithOpenIDProvider(openIDProvider))
+
+		cookieManager.EXPECT().
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "stored-state", Provider: "openid"}, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=incoming-state", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "State mismatch") {
+			t.Errorf("Expected 'State mismatch', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("Provider mismatch -> 400 Bad Request", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+
+		server := NewServer(nil, nil, cookieManager, nil, nil, WithOpenIDProvider(openIDProvider))
+
+		cookieManager.EXPECT().
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "mock-state", Provider: "oidc"}, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=mock-state", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Provider mismatch") {
+			t.Errorf("Expected 'Provider mismatch', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("OpenID provider verification fails -> 400 Bad Request", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+
+		server := NewServer(nil, nil, cookieManager, nil, nil, WithOpenIDProvider(openIDProvider))
+
+		cookieManager.EXPECT().
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "mock-state", Provider: "openid"}, nil)
+
+		cookieManager.EXPECT().
+			ClearAuthState(gomock.Any(), gomock.Any())
+
+		openIDProvider.EXPECT().
+			VerifyCallback(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, errors.New("secret provider error detail"))
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=mock-state", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "OpenID verification failed") {
+			t.Errorf("Expected 'OpenID verification failed', got %s", w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "secret provider error detail") {
+			t.Errorf("Error leaked internal details: %s", w.Body.String())
+		}
+	})
+
+	t.Run("Empty claims / no user ID -> 400 Bad Request", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+
+		server := NewServer(nil, nil, cookieManager, nil, nil, WithOpenIDProvider(openIDProvider))
+
+		cookieManager.EXPECT().
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "mock-state", Provider: "openid"}, nil)
+
+		cookieManager.EXPECT().
+			ClearAuthState(gomock.Any(), gomock.Any())
+
+		openIDProvider.EXPECT().
+			VerifyCallback(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(&openid.Claims{}, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=mock-state", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Failed to extract user ID") {
+			t.Errorf("Expected 'Failed to extract user ID', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("Invalid return_to in state falls back to /", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+		store := NewMockStore(ctrl)
+
+		server := NewServer(store, nil, cookieManager, nil, nil, WithOpenIDProvider(openIDProvider))
+
+		cookieManager.EXPECT().
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "mock-openid-state", ReturnTo: "https://evil.com", Provider: "openid"}, nil)
+
+		cookieManager.EXPECT().
+			ClearAuthState(gomock.Any(), gomock.Any())
+
+		mockClaims := &openid.Claims{
+			Email: "testuser@example.com",
+		}
+
+		openIDProvider.EXPECT().
+			VerifyCallback(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(mockClaims, nil)
+
+		store.EXPECT().
+			Set(gomock.Any(), gomock.Any()).
+			Return(nil)
+
+		cookieManager.EXPECT().
+			SetSessionCookie(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=mock-openid-state", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusFound {
+			t.Errorf("Expected status 302, got %d", w.Code)
+		}
+		if loc := w.Header().Get("Location"); loc != "/" {
+			t.Errorf("Expected redirect to /, got %s", loc)
 		}
 	})
 }
@@ -800,6 +1310,9 @@ func TestHandleLogout(t *testing.T) {
 		Return(nil).
 		AnyTimes()
 
+	cookieManager.EXPECT().
+		ClearSessionCookie(gomock.Any(), gomock.Any())
+
 	// Create test request with a cookie
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
 	req.AddCookie(&http.Cookie{
@@ -821,19 +1334,6 @@ func TestHandleLogout(t *testing.T) {
 	body := w.Body.String()
 	if body != "Logged out" {
 		t.Errorf("Expected 'Logged out', got %s", body)
-	}
-
-	// Verify cookie is cleared
-	cookies := w.Result().Cookies()
-	foundClearedCookie := false
-	for _, cookie := range cookies {
-		if cookie.Name == "session_id" && cookie.Value == "" {
-			foundClearedCookie = true
-			break
-		}
-	}
-	if !foundClearedCookie {
-		t.Error("Expected session_id cookie to be cleared")
 	}
 }
 

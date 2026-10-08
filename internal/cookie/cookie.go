@@ -10,7 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
+	"strings"
+	"time"
 
 	"github.com/canonical/secure-token-service/internal/constants"
 	"github.com/chmike/securecookie"
@@ -19,6 +20,21 @@ import (
 var ErrKeyTooShort = errors.New("cookie key is too short: minimum length is 32 bytes")
 
 const MinKeyLength = 32
+
+// headerRecorder is a minimal http.ResponseWriter that records headers in an http.Header map
+// without requiring net/http/httptest in production code.
+type headerRecorder http.Header
+
+func (h headerRecorder) Header() http.Header         { return http.Header(h) }
+func (h headerRecorder) Write(b []byte) (int, error) { return len(b), nil }
+func (h headerRecorder) WriteHeader(statusCode int)  {}
+
+// AuthState holds state data across the authentication redirection flow.
+type AuthState struct {
+	State    string `json:"state"`
+	ReturnTo string `json:"return_to"`
+	Provider string `json:"provider"`
+}
 
 // CookieManager handles secure cookie encoding and decoding.
 type CookieManager struct {
@@ -47,6 +63,7 @@ func NewCookieManager(hashKey []byte) (*CookieManager, error) {
 		MaxAge:   constants.CookieMaxAge,
 		HTTPOnly: true,
 		Secure:   false, // Will be set dynamically based on request
+		SameSite: securecookie.Lax,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create session cookie: %w", err)
@@ -57,6 +74,7 @@ func NewCookieManager(hashKey []byte) (*CookieManager, error) {
 		MaxAge:   constants.CookieMaxAge,
 		HTTPOnly: true,
 		Secure:   false, // Will be set dynamically based on request
+		SameSite: securecookie.Lax,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oauth state cookie: %w", err)
@@ -67,6 +85,7 @@ func NewCookieManager(hashKey []byte) (*CookieManager, error) {
 		MaxAge:   constants.CookieMaxAge,
 		HTTPOnly: true,
 		Secure:   false, // Will be set dynamically based on request
+		SameSite: securecookie.Lax,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create oauth nonce cookie: %w", err)
@@ -89,17 +108,19 @@ func (m *CookieManager) Encode(name string, value string) (string, error) {
 		MaxAge:   constants.CookieMaxAge,
 		HTTPOnly: true,
 		Secure:   false,
+		SameSite: securecookie.Lax,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create cookie object: %w", err)
 	}
 
-	recorder := httptest.NewRecorder()
+	recorder := make(headerRecorder)
 	if err := obj.SetValue(recorder, []byte(value)); err != nil {
 		return "", err
 	}
 
-	cookies := recorder.Result().Cookies()
+	resp := &http.Response{Header: recorder.Header()}
+	cookies := resp.Cookies()
 	if len(cookies) == 0 {
 		return "", fmt.Errorf("no cookie generated")
 	}
@@ -107,7 +128,6 @@ func (m *CookieManager) Encode(name string, value string) (string, error) {
 	return cookies[0].Value, nil
 }
 
-// Decode decodes a cookie name and value using a fast, optimized approach.
 // Decode decodes a cookie name and value using securecookie.
 func (m *CookieManager) Decode(name, value string) (string, error) {
 	// Create a temporary securecookie object for this specific name
@@ -116,15 +136,13 @@ func (m *CookieManager) Decode(name, value string) (string, error) {
 		MaxAge:   constants.CookieMaxAge,
 		HTTPOnly: true,
 		Secure:   false,
+		SameSite: securecookie.Lax,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create cookie object: %w", err)
 	}
 
-	req, err := http.NewRequest("GET", "/", nil)
-	if err != nil {
-		return "", err
-	}
+	req := &http.Request{Header: make(http.Header)}
 	req.AddCookie(&http.Cookie{
 		Name:  name,
 		Value: value,
@@ -138,48 +156,112 @@ func (m *CookieManager) Decode(name, value string) (string, error) {
 	return string(val), nil
 }
 
-// OIDC State Methods
-
-// SetOIDCState generates a state, creates a cookie with returnTo, and sets it on the response.
-func (m *CookieManager) SetOIDCState(w http.ResponseWriter, r *http.Request, returnTo string) (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("failed to generate state: %w", err)
+// SetSessionCookie sets a standardized session cookie on the response.
+func (m *CookieManager) SetSessionCookie(w http.ResponseWriter, r *http.Request, sessionID string, expiresAt time.Time) error {
+	encodedSession, err := m.Encode("session_id", sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to encode session cookie: %w", err)
 	}
-	state := base64.URLEncoding.EncodeToString(b)
 
-	stateData := map[string]string{
-		"state":     state,
-		"return_to": returnTo,
+	cookie := &http.Cookie{
+		Name:     "session_id",
+		Value:    encodedSession,
+		Path:     "/",
+		Expires:  expiresAt,
+		HttpOnly: true,
+		Secure:   isSecureRequest(r),
+		SameSite: http.SameSiteLaxMode,
 	}
-	stateBytes, _ := json.Marshal(stateData)
+	if v := cookie.String(); v != "" {
+		w.Header().Add("Set-Cookie", v)
+	}
+	return nil
+}
 
-	// Use chmike's SetValue directly, but we need to handle the Secure flag dynamically
+// ClearSessionCookie clears the session cookie on the response with standard security attributes.
+func (m *CookieManager) ClearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	m.deleteSecureCookie(w, r, "session_id")
+}
+
+// Auth State Methods
+
+// SetAuthState generates a state if not provided, creates an encrypted cookie with state, returnTo, and provider, and sets it on the response.
+func (m *CookieManager) SetAuthState(w http.ResponseWriter, r *http.Request, state AuthState) (string, error) {
+	if state.State == "" {
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err != nil {
+			return "", fmt.Errorf("failed to generate state: %w", err)
+		}
+		state.State = base64.URLEncoding.EncodeToString(b)
+	}
+	if state.Provider == "" {
+		state.Provider = "oidc"
+	}
+
+	stateBytes, err := json.Marshal(state)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal auth state: %w", err)
+	}
+
 	if err := m.setSecureCookieValue(w, r, m.oauthStateCk, stateBytes); err != nil {
 		return "", err
 	}
 
-	return state, nil
+	return state.State, nil
 }
 
-// GetOIDCState retrieves and decodes the OIDC state cookie.
-func (m *CookieManager) GetOIDCState(r *http.Request) (map[string]string, error) {
+// GetAuthState retrieves and decodes the auth state cookie.
+func (m *CookieManager) GetAuthState(r *http.Request) (*AuthState, error) {
 	decodedStateBytes, err := m.oauthStateCk.GetValue(nil, r)
 	if err != nil {
 		return nil, fmt.Errorf("invalid state cookie: %w", err)
 	}
 
-	var stateData map[string]string
-	if err := json.Unmarshal(decodedStateBytes, &stateData); err != nil {
-		return nil, fmt.Errorf("failed to parse state data: %w", err)
+	var state AuthState
+	if err := json.Unmarshal(decodedStateBytes, &state); err != nil {
+		return nil, fmt.Errorf("failed to parse auth state: %w", err)
+	}
+	if state.Provider == "" {
+		state.Provider = "oidc"
 	}
 
-	return stateData, nil
+	return &state, nil
+}
+
+// ClearAuthState clears the auth state cookie.
+func (m *CookieManager) ClearAuthState(w http.ResponseWriter, r *http.Request) {
+	m.deleteSecureCookie(w, r, "oauth_state")
+}
+
+// OIDC State Methods (backward-compatible wrappers)
+
+// SetOIDCState generates a state, creates a cookie with returnTo, and sets it on the response.
+// Deprecated: Use SetAuthState instead.
+func (m *CookieManager) SetOIDCState(w http.ResponseWriter, r *http.Request, returnTo string) (string, error) {
+	return m.SetAuthState(w, r, AuthState{
+		ReturnTo: returnTo,
+		Provider: "oidc",
+	})
+}
+
+// GetOIDCState retrieves and decodes the OIDC state cookie.
+// Deprecated: Use GetAuthState instead.
+func (m *CookieManager) GetOIDCState(r *http.Request) (map[string]string, error) {
+	state, err := m.GetAuthState(r)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{
+		"state":     state.State,
+		"return_to": state.ReturnTo,
+		"provider":  state.Provider,
+	}, nil
 }
 
 // ClearOIDCState clears the OIDC state cookie.
+// Deprecated: Use ClearAuthState instead.
 func (m *CookieManager) ClearOIDCState(w http.ResponseWriter, r *http.Request) {
-	m.oauthStateCk.Delete(w)
+	m.ClearAuthState(w, r)
 }
 
 // OIDC Nonce Methods
@@ -211,42 +293,54 @@ func (m *CookieManager) GetOIDCNonce(r *http.Request) (string, error) {
 
 // ClearOIDCNonce clears the OIDC nonce cookie.
 func (m *CookieManager) ClearOIDCNonce(w http.ResponseWriter, r *http.Request) {
-	m.oauthNonceCk.Delete(w)
+	m.deleteSecureCookie(w, r, "oauth_nonce")
+}
+
+// isSecureRequest checks whether the request arrived over TLS or behind a TLS-terminating proxy.
+func isSecureRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+// deleteSecureCookie expires a cookie on the response with standard security attributes.
+func (m *CookieManager) deleteSecureCookie(w http.ResponseWriter, r *http.Request, name string) {
+	cookie := &http.Cookie{
+		Name:     name,
+		Value:    "",
+		Path:     "/",
+		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   isSecureRequest(r),
+		SameSite: http.SameSiteLaxMode,
+	}
+	if v := cookie.String(); v != "" {
+		w.Header().Add("Set-Cookie", v)
+	}
 }
 
 // setSecureCookieValue sets a cookie value with dynamic Secure flag based on request
 func (m *CookieManager) setSecureCookieValue(w http.ResponseWriter, r *http.Request, ck *securecookie.Obj, value []byte) error {
-	// Since chmike's cookie object has a fixed Secure setting, we need to handle this manually
-	// We'll use SetValue and then modify the cookie header if needed
+	isSecure := isSecureRequest(r)
 
-	// Check if we should use secure cookies
-	isSecure := r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
-
-	// If the cookie is already configured with the right secure setting, use it directly
-	// Otherwise, we need to manually construct the cookie
-	if ck.Secure() == isSecure {
-		return ck.SetValue(w, value)
-	}
-
-	// We need to manually set the cookie with the correct Secure flag
-	// First, encode the value using httptest.NewRecorder()
-	recorder := httptest.NewRecorder()
+	recorder := make(headerRecorder)
 	if err := ck.SetValue(recorder, value); err != nil {
 		return err
 	}
 
-	// Get the Set-Cookie header and modify it
-	setCookie := recorder.Header().Get("Set-Cookie")
-	if setCookie == "" {
+	resp := &http.Response{Header: recorder.Header()}
+	cookies := resp.Cookies()
+	if len(cookies) == 0 {
 		return fmt.Errorf("failed to set cookie: no Set-Cookie header")
 	}
 
-	// Add or remove Secure flag as needed
-	if isSecure && !ck.Secure() {
-		setCookie += "; Secure"
-	}
-	// Note: we can't remove Secure if it's already there without parsing and rebuilding
+	cookie := cookies[0]
+	cookie.Secure = isSecure
 
-	w.Header().Add("Set-Cookie", setCookie)
+	if v := cookie.String(); v != "" {
+		w.Header().Add("Set-Cookie", v)
+	}
 	return nil
 }

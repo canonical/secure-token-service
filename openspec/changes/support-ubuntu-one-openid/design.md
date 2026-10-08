@@ -91,6 +91,21 @@ flowchart TD
 
 ---
 
+## System Architecture Model (Archify)
+
+The multi-provider architecture has been formalized, validated, and rendered via **Archify**:
+- **Interactive Visual Artifact**: [`secure-token-service.html`](file:///home/shipperizer/shipperizer/secure-token-service/.archify/architecture-secure-token-service-20261007-192600/secure-token-service.html)
+- **Candidate Specification**: [`candidate.json`](file:///home/shipperizer/shipperizer/secure-token-service/.archify/architecture-secure-token-service-20261007-192600/candidate.json)
+- **Visual Verification Capture**: [`secure-token-service.visual-check.1440x900.dark.png`](file:///home/shipperizer/shipperizer/secure-token-service/.archify/architecture-secure-token-service-20261007-192600/visual-check/secure-token-service.visual-check.1440x900.dark.png)
+
+### Architectural Pillars
+- **Dual Upstream Ingress**: Dual client routing (`OIDC Client` and `Ubuntu One Client`) encapsulated inside the Janus STS boundary.
+- **Centralized Cookie Authority**: `CookieManager` enforces dynamic TLS `Secure` flag, `SameSite=Lax`, and `HttpOnly` across session and auth cookies.
+- **Unified Session Coordination**: `Valkey` stores normalized claims and provider tag, decoupled from upstream token formats.
+- **Phantom Token Translation**: gRPC `ExchangeSession` mints ES256 internal JWTs backed by PostgreSQL keys while preserving downstream identity contract (`sub: email`).
+
+---
+
 ## End-to-End Architecture
 
 ```mermaid

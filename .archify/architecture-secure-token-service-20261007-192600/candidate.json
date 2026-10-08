@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Janus STS — Multi-Provider Architecture (OIDC & Ubuntu One OpenID)",
+    "output": ".archify/architecture-secure-token-service-20261007-192600/secure-token-service.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "git@github.com:canonical/secure-token-service.git",
+      "revision": "dc33836fd6e0d2b8c80becd49bb607977c827888",
+      "link_mode": "local-only"
+    }
+  },
+  "components": [
+    { "id": "oidcidp", "type": "external", "label": "Upstream OIDC IdP", "sublabel": "Google / Hydra · OAuth2", "pos": [30, 180], "size": [140, 60] },
+    { "id": "ubuntuone", "type": "external", "label": "Ubuntu One IdP", "sublabel": "login.ubuntu.com/+openid", "pos": [30, 340], "size": [140, 60] },
+    { "id": "oidcclient", "type": "security", "label": "OIDC Client", "sublabel": "go-oidc discovery & token", "pos": [320, 180], "size": [150, 64],
+      "sources": [
+        { "path": "internal/http/oidc.go", "line": 21, "end_line": 38, "label": "StandardOIDCProvider" },
+        { "path": "cmd/sts/serve.go", "line": 134, "end_line": 146, "label": "OIDC provider wiring" }
+      ] },
+    { "id": "openidclient", "type": "security", "label": "Ubuntu One Client", "sublabel": "checkid_setup & verify", "pos": [320, 340], "size": [150, 64],
+      "sources": [
+        { "path": "internal/auth/openid/ubuntuone.go", "line": 120, "end_line": 169, "label": "BuildAuthURL" },
+        { "path": "internal/auth/openid/ubuntuone.go", "line": 171, "end_line": 245, "label": "VerifyCallback" }
+      ] },
+    { "id": "browser", "type": "external", "label": "User Agent / Browser", "sublabel": "session & auth cookies", "pos": [590, 40], "size": [160, 60] },
+    { "id": "httpserver", "type": "backend", "label": "HTTP Server", "sublabel": "chi :8080 · auth router", "pos": [590, 260], "size": [160, 64],
+      "sources": [
+        { "path": "internal/http/server.go", "line": 279, "end_line": 344, "label": "handleLogin dispatch" },
+        { "path": "internal/http/server.go", "line": 496, "end_line": 595, "label": "handleOpenIDCallback" },
+        { "path": "internal/http/server.go", "line": 373, "end_line": 450, "label": "handleCallback (OIDC)" }
+      ] },
+    { "id": "cookiemgr", "type": "security", "label": "Cookie Manager", "sublabel": "AES/HMAC · TLS Secure", "pos": [590, 480], "size": [160, 64],
+      "sources": [
+        { "path": "internal/cookie/cookie.go", "line": 155, "end_line": 187, "label": "SetSessionCookie" },
+        { "path": "internal/cookie/cookie.go", "line": 205, "end_line": 237, "label": "SetAuthState / GetAuthState" }
+      ] },
+    { "id": "sessionmgr", "type": "backend", "label": "Session Store", "sublabel": "stores session & claims", "pos": [880, 260], "size": [150, 64],
+      "sources": [
+        { "path": "internal/session/store.go", "line": 20, "end_line": 31, "label": "Session model" },
+        { "path": "internal/session/store.go", "line": 59, "end_line": 85, "label": "ValkeyStore" }
+      ] },
+    { "id": "valkey", "type": "database", "label": "Valkey / Redis", "sublabel": "session store · :6379", "pos": [880, 620], "size": [150, 60],
+      "sources": [
+        { "path": "internal/session/store.go", "line": 78, "end_line": 115, "label": "valkey client CRUD" }
+      ] },
+    { "id": "apigateway", "type": "external", "label": "API Gateway / Envoy", "sublabel": "PEP · forwards session", "pos": [1160, 40], "size": [150, 60] },
+    { "id": "grpcserver", "type": "backend", "label": "gRPC Token Service", "sublabel": "ExchangeSession · :9090", "pos": [1160, 260], "size": [150, 64],
+      "sources": [
+        { "path": "internal/grpc/server.go", "line": 60, "end_line": 106, "label": "ExchangeSession" },
+        { "path": "cmd/sts/serve.go", "line": 181, "end_line": 186, "label": "gRPC server wiring" }
+      ] },
+    { "id": "microservices", "type": "backend", "label": "Internal Services", "sublabel": "internal Bearer JWT", "pos": [1455, 40], "size": [150, 60] },
+    { "id": "keymgr", "type": "security", "label": "Key Manager", "sublabel": "ES256 minting · JWKS", "pos": [1455, 260], "size": [150, 64],
+      "sources": [
+        { "path": "internal/auth/token.go", "line": 159, "end_line": 186, "label": "MintToken" },
+        { "path": "internal/auth/token.go", "line": 227, "end_line": 255, "label": "GetJWK" }
+      ] },
+    { "id": "postgres", "type": "database", "label": "PostgreSQL", "sublabel": "JWKS EC keys · :5432", "pos": [1455, 620], "size": [150, 60],
+      "sources": [
+        { "path": "internal/db/jwks_repository.go", "line": 49, "end_line": 85, "label": "PostgresJWKSRepository" }
+      ] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "Janus STS Process (Go :8080 HTTP & :9090 gRPC)", "wraps": ["oidcclient", "openidclient", "httpserver", "cookiemgr", "sessionmgr", "grpcserver", "keymgr"] },
+    { "kind": "region", "label": "Storage Layer", "wraps": ["valkey", "postgres"] }
+  ],
+  "connections": [
+    { "id": "oidc-exchange", "from": "oidcclient", "to": "oidcidp", "label": "OAuth2 code exchange", "variant": "security" },
+    { "id": "openid-verify", "from": "openidclient", "to": "ubuntuone", "label": "check_authentication POST", "variant": "security" },
+    { "id": "browser-login", "from": "browser", "to": "httpserver", "label": "GET /auth/login?provider=...", "variant": "emphasis" },
+    { "id": "http-to-oidc", "from": "httpserver", "to": "oidcclient", "label": "provider=oidc" },
+    { "id": "http-to-openid", "from": "httpserver", "to": "openidclient", "label": "provider=openid" },
+    { "id": "http-to-cookie", "from": "httpserver", "to": "cookiemgr", "label": "SetSessionCookie (TLS Secure)" },
+    { "id": "http-to-session", "from": "httpserver", "to": "sessionmgr", "label": "create session" },
+    { "id": "session-to-valkey", "from": "sessionmgr", "to": "valkey", "label": "persist session JSON (TTL 1h)" },
+    { "id": "browser-to-gateway", "from": "browser", "to": "apigateway", "label": "API request + session cookie", "variant": "emphasis" },
+    { "id": "gateway-to-grpc", "from": "apigateway", "to": "grpcserver", "label": "gRPC ExchangeSession", "variant": "emphasis" },
+    { "id": "gateway-to-services", "from": "apigateway", "to": "microservices", "label": "request + Bearer JWT", "variant": "emphasis" },
+    { "id": "grpc-to-session", "from": "grpcserver", "to": "sessionmgr", "label": "get session & claims" },
+    { "id": "grpc-to-keymgr", "from": "grpcserver", "to": "keymgr", "label": "MintToken (claims)" },
+    { "id": "keymgr-to-postgres", "from": "keymgr", "to": "postgres", "label": "load active EC private key" },
+    { "id": "services-verify-jwks", "from": "microservices", "to": "keymgr", "label": "verify JWKS keys", "variant": "dashed" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Multi-Provider Ingress", "items": [
+      "GET /auth/login?provider=oidc|openid — dynamic provider selection with fallback to DEFAULT_AUTH_PROVIDER",
+      "GET /auth/callback — OIDC authorization code exchange & ID token verification",
+      "GET /auth/openid/callback — Ubuntu One OpenID 2.0 direct verification via check_authentication POST",
+      "POST /auth/logout — terminates session in Valkey and clears standardized cookies"
+    ] },
+    { "dot": "emerald", "title": "Standardized Session & Cookie Security", "items": [
+      "Dynamic Secure flag evaluated via TLS check (r.TLS != nil) or X-Forwarded-Proto == https",
+      "AES-GCM encrypted state cookie (oauth_state) embedding selected provider, return_to, and nonce",
+      "Opaque session cookie (session_id) with HttpOnly: true, SameSite: Lax, Path: /",
+      "Valkey session store retains Provider ('oidc' | 'openid') and normalized Claims map"
+    ] },
+    { "dot": "rose", "title": "Phantom Token Translation & Key Management", "items": [
+      "gRPC ExchangeSession decodes session cookie and retrieves session & claims from Valkey",
+      "Ubuntu One claims normalized from openid.alias3.value.email, nickname, fullname into standard JWT map",
+      "JWT identity contract preserved: sub matches email, custom claims merged without overriding subject",
+      "KeyManager signs internal JWT with ES256 using latest active PostgreSQL EC key"
+    ] },
+    { "dot": "violet", "title": "Observability & Resilience", "items": [
+      "Prometheus /metrics endpoint tracks HTTP & gRPC request latencies and session creations",
+      "OpenTelemetry tracing and structured Zap logs with correlation IDs",
+      "Valkey JWKS key caching with 10-minute configurable TTL"
+    ] }
+  ]
+}

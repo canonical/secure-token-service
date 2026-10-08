@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/canonical/secure-token-service/internal/auth"
+	"github.com/canonical/secure-token-service/internal/auth/openid"
 	"github.com/canonical/secure-token-service/internal/config"
 	"github.com/canonical/secure-token-service/internal/cookie"
 	"github.com/canonical/secure-token-service/internal/db"
@@ -150,6 +151,13 @@ func runServe(cmd *cobra.Command, args []string) error {
 		allowedHosts = append(allowedHosts, redirectURL.Host)
 	}
 
+	// Initialize Ubuntu One OpenID client
+	openIDClient := openid.NewClient(cfg.UbuntuOneOpenIDURL, cfg.UbuntuOneRealm, nil)
+	obs.Logger.Info("Ubuntu One OpenID provider initialized",
+		zap.String("url", cfg.UbuntuOneOpenIDURL),
+		zap.String("realm", cfg.UbuntuOneRealm),
+		zap.String("default_provider", cfg.DefaultAuthProvider))
+
 	// Start HTTP server in goroutine with observability
 	oidcProvider := httpserver.NewOIDCProvider(provider, oauth2Config)
 	httpSrvWithObs := httpserver.NewServer(
@@ -159,6 +167,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		oidcProvider,
 		obs,
 		httpserver.WithAllowedHosts(allowedHosts),
+		httpserver.WithOpenIDProvider(openIDClient),
+		httpserver.WithDefaultAuthProvider(cfg.DefaultAuthProvider),
+		httpserver.WithSessionExpiry(time.Duration(cfg.SessionExpiry)*time.Second),
 	)
 	go func() {
 		if err := httpSrvWithObs.StartWithMiddleware(cfg.HTTPPort); err != nil && err != http.ErrServerClosed {

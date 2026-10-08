@@ -30,13 +30,24 @@ tags:
 paths:
   /auth/login:
     get:
-      summary: Initiate OIDC login
+      summary: Initiate login flow
       description: |
-        Redirects to upstream OIDC provider for authentication.
-        Sets state and nonce cookies for CSRF protection.
+        Redirects to the upstream authentication provider (OIDC or Ubuntu One OpenID 2.0).
+        Sets encrypted auth state cookie for CSRF protection and flow context.
+        The Secure cookie flag is dynamically enabled when accessed via HTTPS or behind a TLS-terminating proxy.
       tags:
         - Authentication
       parameters:
+        - name: provider
+          in: query
+          description: |
+            Authentication provider to use: 'oidc' or 'openid'.
+            If omitted, falls back to the configured DEFAULT_AUTH_PROVIDER (defaults to 'oidc').
+          required: false
+          schema:
+            type: string
+            enum: ["oidc", "openid"]
+            example: "openid"
         - name: return_to
           in: query
           description: |
@@ -50,31 +61,31 @@ paths:
             example: "/dashboard"
       responses:
         '302':
-          description: Redirect to OIDC provider
+          description: Redirect to upstream authentication provider
           headers:
             Location:
               schema:
                 type: string
-                example: "https://idp.example.com/authorize?client_id=...&redirect_uri=..."
+                example: "https://login.ubuntu.com/+openid?openid.mode=checkid_setup&..."
             Set-Cookie:
-              description: OIDC state and nonce cookies
+              description: Encrypted auth state cookie with dynamic Secure attribute
               schema:
                 type: string
-                example: "oauth_state=...; HttpOnly; Secure; SameSite=Lax"
+                example: "oauth_state=...; Path=/; HttpOnly; SameSite=Lax"
         '400':
-          description: Bad request (invalid return_to parameter)
+          description: Bad request (invalid return_to parameter or unsupported provider)
           content:
             text/plain:
               schema:
                 type: string
-                example: "Invalid return_to parameter"
+                example: "Unsupported authentication provider"
 
   /auth/callback:
     get:
       summary: OIDC callback endpoint
       description: |
         Handles OIDC provider callback after user authentication.
-        Exchanges authorization code for tokens, creates session, and sets session cookie.
+        Exchanges authorization code for tokens, creates session, and sets standardized session cookie.
       tags:
         - Authentication
       parameters:
@@ -114,10 +125,10 @@ paths:
                 type: string
                 example: "/dashboard"
             Set-Cookie:
-              description: Opaque session cookie
+              description: Standardized session cookie with dynamic Secure attribute
               schema:
                 type: string
-                example: "session_id=uuid; HttpOnly; Secure; SameSite=Lax; Max-Age=3600"
+                example: "session_id=...; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600"
         '400':
           description: Bad request (invalid state, missing code, OIDC error)
           content:
@@ -132,6 +143,78 @@ paths:
               schema:
                 type: string
                 example: "Failed to exchange authorization code"
+
+  /auth/openid/callback:
+    get:
+      summary: Ubuntu One OpenID 2.0 callback endpoint
+      description: |
+        Handles Ubuntu One OpenID 2.0 callback verification via direct check_authentication POST.
+        Extracts user identity (email/nickname/claimed_id) and attribute exchange claims, creates session,
+        and sets standardized session cookie.
+      tags:
+        - Authentication
+      parameters:
+        - name: openid.mode
+          in: query
+          required: true
+          description: OpenID mode parameter (e.g. id_res or cancel)
+          schema:
+            type: string
+        - name: openid.identity
+          in: query
+          required: false
+          description: Claimed identifier URL
+          schema:
+            type: string
+        - name: openid.return_to
+          in: query
+          required: false
+          description: Return URL passed during redirection
+          schema:
+            type: string
+        - name: openid.response_nonce
+          in: query
+          required: false
+          description: OpenID verification nonce
+          schema:
+            type: string
+      responses:
+        '302':
+          description: |
+            Successful authentication, redirect to return_to URL.
+            If return_to in state is missing or invalid, safely falls back to "/".
+          headers:
+            Location:
+              schema:
+                type: string
+                example: "/dashboard"
+            Set-Cookie:
+              description: Standardized session cookie with dynamic Secure attribute
+              schema:
+                type: string
+                example: "session_id=...; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600"
+        '400':
+          description: Bad request (authentication canceled or invalid parameters)
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Authentication canceled by user"
+        '401':
+          description: Unauthorized (OpenID verification failed)
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "OpenID verification failed"
+        '500':
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "Failed to create session"
+
 
  /auth/logout:
     post:

@@ -5,7 +5,9 @@ package httpserver
 
 import (
 	"fmt"
+	"html"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/canonical/secure-token-service/internal/session"
@@ -55,7 +57,7 @@ func renderUnauthenticatedHome(w http.ResponseWriter) {
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
@@ -67,52 +69,134 @@ func renderUnauthenticatedHome(w http.ResponseWriter) {
             background: white;
             border-radius: 16px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            padding: 60px 40px;
+            padding: 48px 40px;
             max-width: 480px;
             width: 100%;
             text-align: center;
         }
         h1 {
-            color: #333;
-            font-size: 32px;
+            color: #1a202c;
+            font-size: 28px;
             margin-bottom: 12px;
             font-weight: 700;
         }
         p {
-            color: #666;
-            font-size: 16px;
+            color: #4a5568;
+            font-size: 15px;
             line-height: 1.6;
-            margin-bottom: 32px;
+            margin-bottom: 28px;
+        }
+        .provider-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin-bottom: 24px;
         }
         .btn {
-            display: inline-block;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 16px 48px;
-            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            padding: 14px 20px;
+            border-radius: 10px;
             text-decoration: none;
+            color: white;
             font-weight: 600;
-            font-size: 16px;
-            transition: transform 0.2s, box-shadow 0.2s;
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+            font-size: 15px;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+            text-align: left;
+            border: 2px solid transparent;
         }
         .btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+        .btn:focus-visible {
+            outline: 3px solid #1a202c;
+            outline-offset: 2px;
+        }
+        .btn-icon {
+            font-size: 24px;
+            margin-right: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            flex-shrink: 0;
+        }
+        .btn-details {
+            display: flex;
+            flex-direction: column;
+        }
+        .btn-title {
+            font-weight: 600;
+            font-size: 15px;
+            line-height: 1.3;
+        }
+        .btn-subtitle {
+            font-weight: 400;
+            font-size: 12px;
+            opacity: 0.9;
+            line-height: 1.3;
+        }
+        .btn-oidc {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35);
+        }
+        .btn-oidc:hover {
+            box-shadow: 0 6px 20px rgba(79, 70, 229, 0.5);
+        }
+        .btn-openid {
+            background: linear-gradient(135deg, #c7380b 0%, #77216F 100%);
+            box-shadow: 0 4px 14px rgba(199, 56, 11, 0.35);
+        }
+        .btn-openid:hover {
+            box-shadow: 0 6px 20px rgba(199, 56, 11, 0.5);
+        }
+        .default-provider {
+            border-top: 1px solid #e2e8f0;
+            padding-top: 18px;
+            margin-top: 8px;
+        }
+        .default-link {
+            color: #718096;
+            font-size: 13px;
+            text-decoration: none;
+            transition: color 0.15s ease;
+        }
+        .default-link:hover {
+            color: #1a202c;
+            text-decoration: underline;
         }
         .icon {
-            font-size: 64px;
-            margin-bottom: 24px;
+            font-size: 56px;
+            margin-bottom: 20px;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="icon">🔐</div>
+    <main class="container">
+        <div class="icon" aria-hidden="true">🔐</div>
         <h1>Secure Token Service</h1>
-        <p>Welcome! Please log in to view your session information and tokens.</p>
-        <a href="/auth/login" class="btn">Log In</a>
-    </div>
+        <p>Welcome! Select an authentication provider below to sign in and test authentication locally.</p>
+        <div class="provider-buttons">
+            <a href="/auth/login?provider=oidc" class="btn btn-oidc" id="login-oidc">
+                <span class="btn-icon" aria-hidden="true">🌐</span>
+                <span class="btn-details">
+                    <span class="btn-title">Log In with OIDC</span>
+                    <span class="btn-subtitle">Standard OpenID Connect Provider</span>
+                </span>
+            </a>
+            <a href="/auth/login?provider=openid" class="btn btn-openid" id="login-openid">
+                <span class="btn-icon" aria-hidden="true">🟠</span>
+                <span class="btn-details">
+                    <span class="btn-title">Log In with Ubuntu One</span>
+                    <span class="btn-subtitle">Ubuntu One (OpenID 2.0)</span>
+                </span>
+            </a>
+        </div>
+        <div class="default-provider">
+            <a href="/auth/login" class="default-link">Default Provider (/auth/login)</a>
+        </div>
+    </main>
 </body>
 </html>`
 	w.Write([]byte(html))
@@ -122,12 +206,15 @@ func renderUnauthenticatedHome(w http.ResponseWriter) {
 func renderAuthenticatedHome(w http.ResponseWriter, sess *session.Session) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	// Mask tokens for security (show last 10 chars)
+	// Mask tokens for security (show first 4 and last 4 chars for long tokens)
 	maskToken := func(token string) string {
-		if len(token) <= 10 {
+		if token == "" {
+			return "N/A"
+		}
+		if len(token) <= 12 {
 			return "***"
 		}
-		return "..." + token[len(token)-10:]
+		return token[:4] + "..." + token[len(token)-4:]
 	}
 
 	accessToken := maskToken(sess.AccessToken)
@@ -135,6 +222,38 @@ func renderAuthenticatedHome(w http.ResponseWriter, sess *session.Session) {
 	refreshToken := "N/A"
 	if sess.RefreshToken != "" {
 		refreshToken = maskToken(sess.RefreshToken)
+	}
+
+	provider := sess.Provider
+	if provider == "" {
+		provider = "oidc"
+	}
+	providerDisplayName := getProviderDisplayName(provider)
+
+	var claimsSection string
+	if len(sess.Claims) > 0 {
+		var claimItems string
+		keys := make([]string, 0, len(sess.Claims))
+		for k := range sess.Claims {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			valStr := fmt.Sprintf("%v", sess.Claims[k])
+			claimItems += fmt.Sprintf(`
+                <div class="info-item">
+                    <div class="label">%s</div>
+                    <div class="value">%s</div>
+                </div>`, html.EscapeString(k), html.EscapeString(valStr))
+		}
+
+		claimsSection = fmt.Sprintf(`
+        <div class="card">
+            <h2 style="color: #333; font-size: 24px; margin-bottom: 24px;">📋 Normalized Claims</h2>
+            <div class="info-grid">
+                %s
+            </div>
+        </div>`, claimItems)
 	}
 
 	html := fmt.Sprintf(`<!DOCTYPE html>
@@ -214,6 +333,47 @@ func renderAuthenticatedHome(w http.ResponseWriter, sess *session.Session) {
             background: #f8d7da;
             color: #721c24;
         }
+        .provider-badge {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            color: white;
+        }
+        .provider-openid {
+            background: linear-gradient(135deg, #c7380b 0%%, #77216F 100%%);
+        }
+        .provider-oidc {
+            background: linear-gradient(135deg, #4f46e5 0%%, #7c3aed 100%%);
+        }
+        .switch-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+        .switch-link {
+            display: inline-block;
+            padding: 10px 18px;
+            border-radius: 8px;
+            text-decoration: none;
+            color: white;
+            font-weight: 600;
+            font-size: 13px;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .switch-link:hover {
+            transform: translateY(-2px);
+        }
+        .switch-oidc {
+            background: linear-gradient(135deg, #4f46e5 0%%, #7c3aed 100%%);
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+        }
+        .switch-openid {
+            background: linear-gradient(135deg, #c7380b 0%%, #77216F 100%%);
+            box-shadow: 0 4px 12px rgba(199, 56, 11, 0.3);
+        }
         .btn {
             display: inline-block;
             background: #dc3545;
@@ -256,6 +416,12 @@ func renderAuthenticatedHome(w http.ResponseWriter, sess *session.Session) {
                     <div class="value">%s</div>
                 </div>
                 <div class="info-item">
+                    <div class="label">Authentication Provider</div>
+                    <div class="value">
+                        <span class="provider-badge provider-%s">%s</span>
+                    </div>
+                </div>
+                <div class="info-item">
                     <div class="label">Session ID</div>
                     <div class="value">%s</div>
                 </div>
@@ -276,6 +442,8 @@ func renderAuthenticatedHome(w http.ResponseWriter, sess *session.Session) {
             </div>
         </div>
 
+        %s
+
         <div class="card">
             <h2 style="color: #333; font-size: 24px; margin-bottom: 24px;">🔑 Tokens</h2>
             <div class="info-grid">
@@ -294,6 +462,15 @@ func renderAuthenticatedHome(w http.ResponseWriter, sess *session.Session) {
             </div>
         </div>
 
+        <div class="card">
+            <h2 style="color: #333; font-size: 20px; margin-bottom: 12px;">🔄 Switch / Test Provider</h2>
+            <p style="color: #666; font-size: 14px; margin-bottom: 16px;">Initiate a new authentication session with a different provider:</p>
+            <div class="switch-actions">
+                <a href="/auth/login?provider=oidc" class="switch-link switch-oidc">Log In with OIDC</a>
+                <a href="/auth/login?provider=openid" class="switch-link switch-openid">Log In with Ubuntu One</a>
+            </div>
+        </div>
+
         <form method="POST" action="/auth/logout" class="logout-form">
             <button type="submit" class="btn">Logout</button>
         </form>
@@ -302,11 +479,14 @@ func renderAuthenticatedHome(w http.ResponseWriter, sess *session.Session) {
 </html>`,
 		sess.UserID,
 		sess.UserID,
+		html.EscapeString(provider),
+		html.EscapeString(providerDisplayName),
 		sess.SessionID,
 		getStatusClass(sess.ExpiresAt),
 		getStatusText(sess.ExpiresAt),
 		sess.ExpiresAt.Format("2006-01-02 15:04:05 MST"),
 		sess.CreatedAt.Format("2006-01-02 15:04:05 MST"),
+		claimsSection,
 		accessToken,
 		idToken,
 		refreshToken,
@@ -329,4 +509,19 @@ func getStatusText(expiresAt time.Time) string {
 		return "Active"
 	}
 	return "Expired"
+}
+
+// getProviderDisplayName returns a formatted name for display
+func getProviderDisplayName(provider string) string {
+	switch provider {
+	case "openid":
+		return "Ubuntu One (OpenID 2.0)"
+	case "oidc":
+		return "OpenID Connect (OIDC)"
+	default:
+		if provider != "" {
+			return provider
+		}
+		return "OIDC"
+	}
 }

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/canonical/secure-token-service/internal/auth/openid"
+	"github.com/canonical/secure-token-service/internal/cookie"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"golang.org/x/oauth2"
 )
@@ -20,6 +22,11 @@ type CookieManager interface {
 	SetOIDCNonce(w http.ResponseWriter, r *http.Request) (string, error)
 	GetOIDCNonce(r *http.Request) (string, error)
 	ClearOIDCNonce(w http.ResponseWriter, r *http.Request)
+	SetAuthState(w http.ResponseWriter, r *http.Request, state cookie.AuthState) (string, error)
+	GetAuthState(r *http.Request) (*cookie.AuthState, error)
+	ClearAuthState(w http.ResponseWriter, r *http.Request)
+	SetSessionCookie(w http.ResponseWriter, r *http.Request, sessionID string, expiresAt time.Time) error
+	ClearSessionCookie(w http.ResponseWriter, r *http.Request)
 }
 
 // KeyManager defines the interface for JWT key management
@@ -36,6 +43,11 @@ type AuthCookieManager interface {
 	SetOIDCNonce(w http.ResponseWriter, r *http.Request) (string, error)
 	GetOIDCNonce(r *http.Request) (string, error)
 	ClearOIDCNonce(w http.ResponseWriter, r *http.Request)
+	SetAuthState(w http.ResponseWriter, r *http.Request, state cookie.AuthState) (string, error)
+	GetAuthState(r *http.Request) (*cookie.AuthState, error)
+	ClearAuthState(w http.ResponseWriter, r *http.Request)
+	SetSessionCookie(w http.ResponseWriter, r *http.Request, sessionID string, expiresAt time.Time) error
+	ClearSessionCookie(w http.ResponseWriter, r *http.Request)
 	// Additional methods for session cookies
 	Encode(name, value string) (string, error)
 	Decode(name, value string) (string, error)
@@ -66,3 +78,10 @@ type OIDCProvider interface {
 	Verifier() interface{}
 	VerifyIDToken(ctx context.Context, rawIDToken string) (IDToken, error)
 }
+
+// OpenIDProvider defines the interface for OpenID 2.0 provider operations
+type OpenIDProvider interface {
+	BuildAuthURL(returnToURL, stateToken string) (string, error)
+	VerifyCallback(ctx context.Context, r *http.Request, expectedReturnTo string) (*openid.Claims, error)
+}
+

@@ -199,11 +199,13 @@ sequenceDiagram
 ### HTTP Server (`internal/http/server.go`)
 
 **Endpoints**:
-- `GET /auth/login` - Initiates OIDC flow
+- `GET /auth/login` - Initiates authentication flow (supports `?provider=oidc|openid`)
 - `GET /auth/callback` - OIDC callback handler
+- `GET /auth/openid/callback` - Ubuntu One OpenID 2.0 callback handler
 - `POST /auth/logout` - Session termination
 - `GET /auth/sessions` - List user sessions
 - `GET /.well-known/jwks.json` - **Public JWKS endpoint** (all active + retired keys)
+
 
 ### gRPC Server (`internal/grpc/server.go`)
 
@@ -351,13 +353,17 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 | `JWT_ISSUER` | `session-service` | JWT `iss` claim |
 | `JWT_AUDIENCE` | `internal-services` | JWT `aud` claim |
 | `JWT_EXPIRY` | `3600` | JWT expiry in seconds |
+| `DEFAULT_AUTH_PROVIDER` | `oidc` | Default provider when `provider` query parameter is omitted (`oidc` or `openid`) |
 | `OIDC_PROVIDER_URL` | - | OIDC provider discovery URL |
 | `OIDC_CLIENT_ID` | - | OAuth2 client ID |
 | `OIDC_CLIENT_SECRET` | - | OAuth2 client secret |
 | `OIDC_REDIRECT_URL` | `http://localhost:8080/auth/callback` | OAuth2 redirect URI |
+| `UBUNTU_ONE_OPENID_URL` | `https://login.ubuntu.com/+openid` | Ubuntu One OpenID 2.0 endpoint |
+| `UBUNTU_ONE_REALM` | `http://localhost:8080` | OpenID trust realm matching service URL |
 | `ALLOWED_RETURN_TO_HOSTS` | - | Comma-separated list of additional trusted hosts allowed for `return_to` redirection |
 | `COOKIE_HASH_KEY` | - | 64-byte hex key for HMAC (required) |
 | `COOKIE_BLOCK_KEY` | - | 32-byte hex key for AES (required) |
+
 
 ### Environment File Management
 
@@ -420,6 +426,10 @@ nano .env.local
 - `OIDC_CLIENT_SECRET`: OAuth2 client secret from your provider
 - `OIDC_SCOPES`: Comma-separated scopes (default: `openid,profile,email,offline_access`)
 - `OIDC_REDIRECT_URL`: Your application's callback URL
+- `DEFAULT_AUTH_PROVIDER`: Primary authentication provider (`oidc` or `openid`, default: `oidc`)
+- `UBUNTU_ONE_OPENID_URL`: Ubuntu One OpenID 2.0 endpoint (default: `https://login.ubuntu.com/+openid`)
+- `UBUNTU_ONE_REALM`: Trust root realm for OpenID matching STS base URL (default: `http://localhost:8080`)
+
 
 **Security Note**: `.env.local` is git-ignored and contains sensitive credentials. Never commit it to version control.
 
