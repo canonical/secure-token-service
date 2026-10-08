@@ -26,9 +26,9 @@ To support M2M callers using the OAuth2 Client Credentials grant via Ory Hydra, 
 ## System Architecture Model (Archify - Dark Theme)
 
 The machine client credentials architecture has been modeled, validated, and rendered via **Archify**:
-- **Interactive Visual Artifact**: [`secure-token-service.html`](file:///home/shipperizer/shipperizer/secure-token-service/.archify/architecture-secure-token-service-20261008-154500/secure-token-service.html)
-- **Candidate Specification**: [`candidate.json`](file:///home/shipperizer/shipperizer/secure-token-service/.archify/architecture-secure-token-service-20261008-154500/candidate.json)
-- **Visual Verification Capture (Dark Theme)**: [`secure-token-service.visual-check.1440x900.dark.png`](file:///home/shipperizer/shipperizer/secure-token-service/.archify/architecture-secure-token-service-20261008-154500/visual-check/secure-token-service.visual-check.1440x900.dark.png)
+- **Interactive Visual Artifact**: [`secure-token-service.html`](../../../.archify/architecture-secure-token-service-20261008-154500/secure-token-service.html)
+- **Candidate Specification**: [`candidate.json`](../../../.archify/architecture-secure-token-service-20261008-154500/candidate.json)
+- **Visual Verification Capture (Dark Theme)**: [`secure-token-service.visual-check.1440x900.dark.png`](../../../.archify/architecture-secure-token-service-20261008-154500/visual-check/secure-token-service.visual-check.1440x900.dark.png)
 
 ## Architecture & Sequence
 
@@ -68,6 +68,7 @@ sequenceDiagram
 
 ### Decision 2: Preemptive JWKS Cache Synchronization
 - **Decision**: Implement a background auto-refreshing JWKS cache (using `lestrrat-go/jwx/v2/jwk.Cache` or a background ticker) that actively polls Hydra's `.well-known/jwks.json` on a fixed interval (e.g., every 5–10 minutes) with preemptive warm-up during STS server startup.
+- **Lifecycle Management**: The background synchronization goroutine and HTTP polling loop run under a dedicated cancellation context tied to STS server shutdown. The verifier exposes `Close() error` (satisfying `io.Closer`) to stop background refresh routines cleanly and release resources, ensuring zero goroutine leaks on graceful server termination.
 - **Rationale**: Eliminates latency spikes on incoming client requests. Standard on-demand fetching or reactive refetching on cache miss causes unpredictable p99 latency regressions and makes STS vulnerable to Hydra JWKS availability blips during user requests.
 - **Alternatives Considered**:
   - *Lazy on-demand fetch on miss*: Causes request latency spikes of 50–200ms when keys rotate or after cache eviction.
@@ -75,6 +76,7 @@ sequenceDiagram
 
 ### Decision 3: Synthetic Email for Machine Identities
 - **Decision**: Set `sub: <client_id>` and synthesize `email: <client_id>@serviceaccount.local`.
+- **Domain Stability**: The `@serviceaccount.local` suffix is an explicitly reserved, non-routable pseudo-domain used strictly for internal microservice identity and namespace partitioning.
 - **Rationale**: Downstream microservices across the ecosystem currently assume the existence of an `email` claim in internal STS JWTs (from human OIDC/Ubuntu One sessions). Using a synthetic domain (`@serviceaccount.local`) guarantees backward compatibility across all legacy consumers without breaking JWT parsing or schema assertions.
 - **Alternatives Considered**:
   - *Omitting the email claim*: Would require auditing and modifying every downstream internal microservice to make `email` optional.
@@ -96,6 +98,8 @@ sequenceDiagram
 
 ## Future Enhancements (TODOs)
 
+Tracked under GitHub issue [canonical/secure-token-service#44](https://github.com/canonical/secure-token-service/issues/44):
+
 1. **TODO: Valkey Token Exchange Caching**:
    - Cache minted internal JWTs in Valkey keyed by SHA-256 hash of the incoming Hydra token: `m2m:cache:<sha256(token)> -> <sts_jwt>`.
    - Set cache TTL to `min(clamped_ttl, 300s)`.
@@ -111,7 +115,8 @@ sequenceDiagram
 | :--- | :--- | :--- |
 | **Hydra JWKS endpoint unreachable at startup** | STS startup failure or delayed readiness | Preemptive fetcher logs a warning and retries with exponential backoff; health checks reflect JWKS synchronization status. |
 | **High request volume causes CPU spikes from ES256 signing** | Elevated gRPC latency at peak load | Benchmark ES256 signing throughput (expected ~2,000–5,000 ops/sec per core); deploy horizontal pod autoscaling and prioritize the Valkey caching TODO if CPU limits are approached. |
-| **Clock skew between Hydra and STS** | Premature rejection or erroneous clamping | Configure a small clock skew tolerance (e.g., 5 seconds) when evaluating `iat` and `exp`. |
+| **ExchangeToken request flooding (DoS / CPU exhaustion)** | Resource exhaustion from cryptographic verification | Enforce strict max token payload size (64 KB) returning `InvalidArgument`; rely on Envoy/authorization-service gateway rate limiting; implement mid-term Valkey caching ([#44](https://github.com/canonical/secure-token-service/issues/44)). |
+| **Clock skew between Hydra and STS** | Premature rejection or erroneous clamping | Configure a 5-second clock skew tolerance when evaluating `iat` and `exp`. |
 | **Upstream token lacks client_id or sub** | Identification failure | Fallback hierarchy: inspect `client_id`, fallback to `sub`. If neither is present, return `codes.InvalidArgument`. |
 
 ## Observability & Telemetry

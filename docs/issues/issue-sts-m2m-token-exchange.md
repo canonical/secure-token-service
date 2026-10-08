@@ -3,7 +3,7 @@
 **GitHub Issue**: [#44](https://github.com/canonical/secure-token-service/issues/44)  
 **Label**: `enhancement`  
 **Companion Issue**: [`canonical/authorization-service#100`](https://github.com/canonical/authorization-service/issues/100)  
-**Architecture Diagram**: [.archify/architecture-secure-token-service-20261008-154500/secure-token-service.html](file:///home/shipperizer/shipperizer/secure-token-service/.archify/architecture-secure-token-service-20261008-154500/secure-token-service.html)
+**Architecture Diagram**: [.archify/architecture-secure-token-service-20261008-154500/secure-token-service.html](../../.archify/architecture-secure-token-service-20261008-154500/secure-token-service.html)
 
 ---
 
@@ -40,24 +40,30 @@ message ExchangeTokenRequest {
 
 ### 2. gRPC Server Implementation (`internal/grpc/server.go`)
 Implement the `ExchangeToken` RPC:
-- Validate `req.Token`: return `codes.InvalidArgument` if empty.
-- Parse/verify claims from the incoming token:
-  - Extract machine subject (`sub` / `client_id`).
-  - Extract relevant custom claims (e.g., `scope`, tenant/org).
+- Validate `req.Token`: return `codes.InvalidArgument` if empty or exceeding 64 KB (DoS protection).
+- Verify cryptographic signature against preemptively cached Hydra JWKS (with 5-second clock skew tolerance).
+- Validate remaining lifetime: reject tokens with `< 60s` remaining validity with `codes.Unauthenticated`.
+- Validate machine subject (`sub` / `client_id`): non-empty, max 256 characters, no control characters or newlines (return `codes.InvalidArgument`).
+- Calculate clamped token TTL: `min(configured_expiry, remaining_upstream_validity)`.
 - Mint internal JWT via `KeyManager.MintToken`:
-  - Set `sub` to the machine client ID.
+  - Set `sub` to machine client ID.
+  - Set synthetic `email` to `<client_id>@serviceaccount.local` for downstream service compatibility.
   - Sign with active PostgreSQL ES256 key.
-  - Return `stsv1.ExchangeResponse{ AccessToken: token, ExpiresIn: expiry }`.
+  - Return `stsv1.ExchangeResponse{ AccessToken: token, ExpiresIn: clamped_ttl }`.
 
-### 3. Observability & Metrics
+### 3. Observability & Security Audit Logging
 - Add Prometheus metric counter: `grpc_server_handled_total{grpc_method="ExchangeToken",grpc_code="..."}`.
-- Emit structured Zap logs with correlation IDs.
+- Add Prometheus histograms for duration and clamped TTL.
+- Emit structured Zap security audit logs for token exchange events (successful exchanges and rejections with reason, client ID, clamped TTL, omitting raw secrets).
 - Trace RPC executions via OpenTelemetry.
 
 ## Acceptance Criteria
 - [ ] `api/proto/v1/sts.proto` updated and protobuf bindings regenerated.
 - [ ] `ExchangeToken` implemented in `internal/grpc/server.go`.
-- [ ] Valid tokens return an internal STS JWT signed with ES256 with `sub` matching the machine client identity.
-- [ ] Invalid/empty tokens return appropriate gRPC error codes (`InvalidArgument`, `Unauthenticated`).
-- [ ] Unit and benchmark tests added to `internal/grpc/server_test.go`.
+- [ ] Valid tokens return an internal STS JWT signed with ES256 with `sub` matching the machine client identity and synthetic `email` `<client_id>@serviceaccount.local`.
+- [ ] Tokens with `< 60s` remaining lifetime rejected with `Unauthenticated`.
+- [ ] Minted JWT TTL clamped to `min(configured_expiry, remaining_upstream_validity)`.
+- [ ] Tokens exceeding 64 KB or with invalid/empty subjects rejected with `InvalidArgument`.
+- [ ] Invalid/untrusted tokens return `Unauthenticated`.
+- [ ] Unit and benchmark tests added covering validation, clamping, and shutdown lifecycle.
 - [ ] Documentation updated in `docs/api/grpc.md` and `README.md`.

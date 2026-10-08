@@ -3,7 +3,7 @@
 **GitHub Issue**: [#100](https://github.com/canonical/authorization-service/issues/100)  
 **Label**: `enhancement`  
 **Companion Issue**: [`canonical/secure-token-service#44`](https://github.com/canonical/secure-token-service/issues/44)  
-**Architecture Diagram**: [.archify/architecture-authorization-service-20261008-154500/authorization-service.html](file:///home/shipperizer/shipperizer/authorization-service/.archify/architecture-authorization-service-20261008-154500/authorization-service.html)
+**Architecture Diagram**: [.archify/architecture-authorization-service-20261008-154500/authorization-service.html](https://github.com/canonical/authorization-service/tree/main/.archify/architecture-authorization-service-20261008-154500/authorization-service.html)
 
 ---
 
