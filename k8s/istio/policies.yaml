@@ -57,7 +57,9 @@ spec:
   rules:
   - to:
     - operation:
-        paths: ["/sts.v1.SecurityTokenService/ExchangeSession"]
+        paths:
+        - "/sts.v1.SecurityTokenService/ExchangeSession"
+        - "/sts.v1.SecurityTokenService/ExchangeToken"
         methods: ["POST"]
 ---
 apiVersion: security.istio.io/v1

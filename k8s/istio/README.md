@@ -31,8 +31,8 @@ Via the gateway, these endpoints are accessible:
 
 ### Internal Services
 
-These remain internal (not exposed via gateway):
-- gRPC service on port 9090
+These remain internal (not exposed via public ingress gateway):
+- gRPC service on port 9090 (`ExchangeSession`, `ExchangeToken`, and `RevokeUserSessions` routed internally via ambient mesh waypoint)
 
 ## Deployment
 

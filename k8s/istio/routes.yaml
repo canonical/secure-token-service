@@ -54,6 +54,9 @@ spec:
         - method:
             service: "sts.v1.SecurityTokenService"
             method: "ExchangeSession"
+        - method:
+            service: "sts.v1.SecurityTokenService"
+            method: "ExchangeToken"
       backendRefs:
         - name: secure-token-service 
           port: 9090

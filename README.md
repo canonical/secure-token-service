@@ -20,10 +20,11 @@ A Security Token Service implementing the Phantom Token Pattern for secure sessi
 
 ## Overview
 
-Janus is a **Policy Enforcement Point (PEP)** and **Security Token Service (STS)** that sits between external clients and internal microservices. It implements the **Phantom Token Pattern** to provide:
+The **Secure Token Service (STS)** is a Policy Enforcement Point (PEP) and token translation service that sits between external clients and internal microservices. It implements the **Phantom Token Pattern** and OAuth2 token exchange to provide:
 
 - **Session Management**: Exchanges OIDC tokens for opaque HttpOnly cookies
 - **Token Translation**: Converts opaque session IDs to signed internal JWTs
+- **M2M Token Exchange**: Swaps upstream IdP client credentials access tokens (e.g., Ory Hydra) for signed internal STS JWTs with TTL clamping and synthetic machine identities
 - **JWT Issuance**: Mints ES256-signed JWTs for service-to-service communication
 - **Key Management**: PostgreSQL-backed JWKS with atomic key rotation
 - **Session Storage**: Valkey/Redis-based session persistence
@@ -213,10 +214,12 @@ sequenceDiagram
 - **Reflection Enabled**: Service discovery via gRPC reflection (no proto files needed for clients)
 - **Cookie-Based Authentication**: Accepts encoded session cookies for enhanced security
 - Session-to-JWT exchange (Phantom Token Pattern)
+- M2M token exchange for OAuth2 client credentials access tokens (with TTL clamping and synthetic identity)
 - Bulk user session revocation
 
 **Methods**:
 - `ExchangeSession(session_cookie) → internal_jwt` - Decodes session cookie and exchanges for JWT
+- `ExchangeToken(token) → internal_jwt` - Validates upstream IdP access token (e.g., Ory Hydra) against pre-cached JWKS, clamps TTL, and mints internal JWT
 - `RevokeUserSessions(user_id) → success` - Bulk session revocation
 
 **Session Cookie Flow**:
@@ -226,6 +229,14 @@ sequenceDiagram
 4. Service retrieves session from Valkey
 5. Service mints internal JWT with custom claims
 6. Client uses JWT internally
+
+**M2M Token Exchange Flow**:
+1. Client authenticates via upstream IdP (e.g., Ory Hydra Client Credentials flow) to obtain access token
+2. Client or API Gateway sends raw access token to `ExchangeToken` RPC
+3. STS validates token against preemptively cached upstream JWKS (RS256)
+4. STS validates expiration (rejects if remaining lifetime < 60s) and clamps internal TTL to upstream validity
+5. STS mints internal ES256 JWT with `sub: <client_id>` and synthetic `email: <client_id>@serviceaccount.local`
+6. Downstream microservices verify STS JWT using STS JWKS (`/.well-known/jwks.json`)
 
 **Usage with grpcurl**:
 ```bash
@@ -238,6 +249,10 @@ grpcurl -plaintext localhost:9090 describe sts.v1.SecurityTokenService
 # Exchange session (requires encoded cookie)
 grpcurl -plaintext -d '{"session_cookie": "encoded-cookie-value"}' \
   localhost:9090 sts.v1.SecurityTokenService/ExchangeSession
+
+# Exchange upstream IdP access token (M2M)
+grpcurl -plaintext -d '{"token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."}' \
+  localhost:9090 sts.v1.SecurityTokenService/ExchangeToken
 
 # Revoke user sessions
 grpcurl -plaintext -d '{"user_id": "user-123"}' \
@@ -358,6 +373,8 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 | `ALLOWED_RETURN_TO_HOSTS` | - | Comma-separated list of additional trusted hosts allowed for `return_to` redirection |
 | `COOKIE_HASH_KEY` | - | 64-byte hex key for HMAC (required) |
 | `COOKIE_BLOCK_KEY` | - | 32-byte hex key for AES (required) |
+| `HYDRA_JWKS_URL` | - | Upstream Hydra JWKS URL for M2M verification (defaults to `${OIDC_PROVIDER_URL}/.well-known/jwks.json`) |
+| `JWKS_CACHE_TTL` | `600` | Preemptive JWKS cache refresh TTL in seconds |
 
 ### Environment File Management
 
@@ -1083,6 +1100,44 @@ message ExchangeResponse {
   "upstream_token": "..."
 }
 ```
+
+#### ExchangeToken
+
+Exchanges an upstream IdP access token (issued via OAuth2 client credentials grant, e.g., Ory Hydra) for an internal STS JWT.
+
+**Request**:
+```protobuf
+message ExchangeTokenRequest {
+  string token = 1;  // Raw upstream IdP access token (JWT, max 64 KB)
+}
+```
+
+**Response**:
+```protobuf
+message ExchangeResponse {
+  string access_token = 1;  // ES256-signed JWT
+  int64 expires_in = 2;     // Seconds until expiration (clamped to upstream TTL)
+}
+```
+
+**JWT Claims**:
+```json
+{
+  "iss": "session-service",
+  "sub": "client-id",
+  "aud": "internal-services",
+  "iat": 1728409400,
+  "exp": 1728410000,
+  "email": "client-id@serviceaccount.local"
+}
+```
+
+**Security & Validation Rules**:
+- **Max Token Size**: Rejects tokens exceeding 64 KB (`INVALID_ARGUMENT`).
+- **Claim Validation**: Upstream `sub`/`client_id` must be non-empty strings, `<= 256` chars, without control characters or newlines (`INVALID_ARGUMENT`).
+- **Expiration Policy**: Tokens with remaining validity under 60 seconds are rejected (`UNAUTHENTICATED`).
+- **Clamping**: Internal token lifetime is clamped to `min(configured_expiry, remaining_upstream_ttl)`.
+- **Clock Skew**: Tolerates up to 5 seconds of clock skew leeway.
 
 #### RevokeUserSessions
 

@@ -45,7 +45,7 @@ func init() {
 func runServe(cmd *cobra.Command, args []string) error {
 	// Create a temporary logger for early startup messages
 	tempLogger, _ := observability.NewLogger("info", false)
-	tempLogger.Info("starting Session Service (Janus)")
+	tempLogger.Info("starting Secure Token Service")
 
 	ctx := context.Background()
 
@@ -166,8 +166,26 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	// Initialize Upstream Hydra Token Verifier for M2M exchange
+	var grpcOpts []grpcserver.ServerOption
+	hydraJWKSURL := cfg.HydraJWKSEndpoint()
+	hydraVerifier, err := auth.NewHydraTokenVerifier(
+		ctx,
+		hydraJWKSURL,
+		auth.WithRefreshInterval(10*time.Minute),
+	)
+	if err != nil {
+		obs.Logger.Warn("failed to initialize Hydra token verifier, ExchangeToken will be unavailable",
+			zap.String("jwks_url", hydraJWKSURL),
+			zap.Error(err))
+	} else {
+		grpcOpts = append(grpcOpts, grpcserver.WithTokenVerifier(hydraVerifier))
+		obs.Logger.Info("Hydra token verifier initialized for M2M token exchange",
+			zap.String("jwks_url", hydraJWKSURL))
+	}
+
 	// Start gRPC server in goroutine with observability
-	grpcSrvWithObs := grpcserver.NewServer(sessionStore, keyManager, cookieManager, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTExpiry, obs)
+	grpcSrvWithObs := grpcserver.NewServer(sessionStore, keyManager, cookieManager, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTExpiry, obs, grpcOpts...)
 	go func() {
 		if err := grpcSrvWithObs.StartWithInterceptors(cfg.GRPCPort); err != nil {
 			obs.Logger.Error("gRPC server failed", zap.Error(err))
@@ -193,6 +211,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Stop gRPC Server
 	if grpcSrvWithObs != nil {
 		grpcSrvWithObs.Stop()
+	} else if hydraVerifier != nil {
+		_ = hydraVerifier.Close()
 	}
 
 	obs.Logger.Info("server exiting")
