@@ -191,6 +191,7 @@ func (s *Server) ExchangeToken(ctx context.Context, req *stsv1.ExchangeTokenRequ
 
 	if s.observability != nil && s.observability.MetricsProvider != nil {
 		s.observability.MetricsProvider.RecordTokenMinted(ctx)
+		s.observability.MetricsProvider.RecordM2MTokenClampedTTL(ctx, float64(clampedExpiry))
 	}
 
 	return &stsv1.ExchangeResponse{

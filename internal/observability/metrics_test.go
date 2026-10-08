@@ -54,6 +54,10 @@ func TestNewMetricsProviderDisabled(t *testing.T) {
 	if mp.keysRotatedCounter == nil {
 		t.Error("expected keysRotatedCounter to be initialized")
 	}
+
+	if mp.m2mClampedTTLHistogram == nil {
+		t.Error("expected m2mClampedTTLHistogram to be initialized")
+	}
 }
 
 func TestRecordHTTPRequestDisabledMetrics(t *testing.T) {
@@ -88,6 +92,7 @@ func TestRecordBusinessMetricsDisabledMetrics(t *testing.T) {
 	mp.RecordSessionCreated(ctx)
 	mp.RecordTokenMinted(ctx)
 	mp.RecordKeyRotation(ctx)
+	mp.RecordM2MTokenClampedTTL(ctx, 300.0)
 }
 
 func TestHTTPMetricsMiddlewareDisabledMetrics(t *testing.T) {

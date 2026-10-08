@@ -51,6 +51,7 @@ type MetricsProvider struct {
 	tokensMintedCounter    metric.Int64Counter
 	keysRotatedCounter     metric.Int64Counter
 	activeKeysGauge        metric.Int64ObservableGauge
+	m2mClampedTTLHistogram metric.Float64Histogram
 }
 
 // NewMetricsProvider creates a new OpenTelemetry metrics provider with OTLP and Prometheus exporters
@@ -213,6 +214,15 @@ func (mp *MetricsProvider) initializeMetrics() error {
 		return err
 	}
 
+	mp.m2mClampedTTLHistogram, err = mp.meter.Float64Histogram(
+		"sts.m2m.token.clamped_ttl",
+		metric.WithDescription("Clamped TTL of minted M2M tokens"),
+		metric.WithUnit("s"),
+	)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -269,6 +279,13 @@ func (mp *MetricsProvider) RecordSessionCreated(ctx context.Context) {
 // RecordTokenMinted increments the tokens minted counter
 func (mp *MetricsProvider) RecordTokenMinted(ctx context.Context) {
 	mp.tokensMintedCounter.Add(ctx, 1)
+}
+
+// RecordM2MTokenClampedTTL records the clamped TTL for an exchanged M2M token
+func (mp *MetricsProvider) RecordM2MTokenClampedTTL(ctx context.Context, ttlSeconds float64) {
+	if mp.m2mClampedTTLHistogram != nil {
+		mp.m2mClampedTTLHistogram.Record(ctx, ttlSeconds)
+	}
 }
 
 // RecordKeyRotation increments the key rotations counter
