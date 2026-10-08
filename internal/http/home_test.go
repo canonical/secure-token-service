@@ -268,9 +268,9 @@ func TestHandleHome_TokenMasking(t *testing.T) {
 
 	body := w.Body.String()
 
-	// Verify tokens are masked (last 10 chars shown for long tokens)
-	if !strings.Contains(body, "...1234567890") {
-		t.Error("Expected long access token to be masked with last 10 chars")
+	// Verify tokens are masked (first 4 and last 4 chars shown for long tokens)
+	if !strings.Contains(body, "this...7890") {
+		t.Error("Expected long access token to be masked with first 4 and last 4 chars")
 	}
 
 	// Short tokens should show as ***

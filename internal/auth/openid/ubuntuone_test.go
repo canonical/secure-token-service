@@ -5,6 +5,7 @@ package openid_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -177,7 +178,7 @@ func TestVerifyCallback_Success(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+callbackQuery.Encode(), nil)
 
-	claims, err := client.VerifyCallback(context.Background(), req)
+	claims, err := client.VerifyCallback(context.Background(), req, "https://example.com/auth/openid/callback?state=xyz")
 	if err != nil {
 		t.Fatalf("VerifyCallback failed: %v", err)
 	}
@@ -228,9 +229,11 @@ func TestVerifyCallback_Ext1NamespaceMapping(t *testing.T) {
 	defer server.Close()
 
 	client := openid.NewClient(server.URL, "", server.Client())
+	returnTo := "https://example.com/auth/openid/callback"
 
 	callbackQuery := url.Values{}
 	callbackQuery.Set("openid.mode", "id_res")
+	callbackQuery.Set("openid.return_to", returnTo)
 	callbackQuery.Set("openid.ns.ext1", openid.AXNS)
 	callbackQuery.Set("openid.ext1.type.email", openid.AXSchemaEmail)
 	callbackQuery.Set("openid.ext1.value.email", "bob@canonical.com")
@@ -242,7 +245,7 @@ func TestVerifyCallback_Ext1NamespaceMapping(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+callbackQuery.Encode(), nil)
 
-	claims, err := client.VerifyCallback(context.Background(), req)
+	claims, err := client.VerifyCallback(context.Background(), req, returnTo)
 	if err != nil {
 		t.Fatalf("VerifyCallback failed: %v", err)
 	}
@@ -268,10 +271,12 @@ func TestVerifyCallback_SREGResponse(t *testing.T) {
 	defer server.Close()
 
 	client := openid.NewClient(server.URL, "", server.Client())
+	returnTo := "https://example.com/auth/openid/callback"
 
 	callbackQuery := url.Values{}
 	callbackQuery.Set("openid.mode", "id_res")
 	callbackQuery.Set("openid.ns", openid.OpenIDNS)
+	callbackQuery.Set("openid.return_to", returnTo)
 	callbackQuery.Set("openid.ns.sreg", openid.SREGNS)
 	callbackQuery.Set("openid.sreg.email", "canonical-user@canonical.com")
 	callbackQuery.Set("openid.sreg.nickname", "canonical-user")
@@ -282,7 +287,7 @@ func TestVerifyCallback_SREGResponse(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+callbackQuery.Encode(), nil)
 
-	claims, err := client.VerifyCallback(context.Background(), req)
+	claims, err := client.VerifyCallback(context.Background(), req, returnTo)
 	if err != nil {
 		t.Fatalf("VerifyCallback failed: %v", err)
 	}
@@ -330,10 +335,12 @@ func TestVerifyCallback_DynamicSREGNamespace(t *testing.T) {
 	defer server.Close()
 
 	client := openid.NewClient(server.URL, "", server.Client())
+	returnTo := "https://example.com/auth/openid/callback"
 
 	callbackQuery := url.Values{}
 	callbackQuery.Set("openid.mode", "id_res")
 	callbackQuery.Set("openid.ns", openid.OpenIDNS)
+	callbackQuery.Set("openid.return_to", returnTo)
 	callbackQuery.Set("openid.ns.ext2", openid.SREGNS10)
 	callbackQuery.Set("openid.ext2.email", "ext2-user@example.com")
 	callbackQuery.Set("openid.ext2.nickname", "ext2-nick")
@@ -342,7 +349,7 @@ func TestVerifyCallback_DynamicSREGNamespace(t *testing.T) {
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+callbackQuery.Encode(), nil)
 
-	claims, err := client.VerifyCallback(context.Background(), req)
+	claims, err := client.VerifyCallback(context.Background(), req, returnTo)
 	if err != nil {
 		t.Fatalf("VerifyCallback failed: %v", err)
 	}
@@ -365,7 +372,7 @@ func TestVerifyCallback_UserCancelled(t *testing.T) {
 	q.Set("openid.mode", "cancel")
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
-	_, err := client.VerifyCallback(context.Background(), req)
+	_, err := client.VerifyCallback(context.Background(), req, "https://example.com/auth/openid/callback")
 	if err == nil {
 		t.Fatal("expected error on cancellation, got nil")
 	}
@@ -379,7 +386,7 @@ func TestVerifyCallback_MissingModeOrNonce(t *testing.T) {
 
 	// Missing mode
 	req1 := httptest.NewRequest("GET", "/auth/openid/callback", nil)
-	_, err := client.VerifyCallback(context.Background(), req1)
+	_, err := client.VerifyCallback(context.Background(), req1, "https://example.com/auth/openid/callback")
 	if err == nil {
 		t.Error("expected error for missing mode")
 	}
@@ -388,15 +395,16 @@ func TestVerifyCallback_MissingModeOrNonce(t *testing.T) {
 	q := url.Values{}
 	q.Set("openid.mode", "unsupported")
 	req2 := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
-	_, err = client.VerifyCallback(context.Background(), req2)
+	_, err = client.VerifyCallback(context.Background(), req2, "https://example.com/auth/openid/callback")
 	if err == nil {
 		t.Error("expected error for unsupported mode")
 	}
 
 	// Missing nonce
 	q.Set("openid.mode", "id_res")
+	q.Set("openid.return_to", "https://example.com/auth/openid/callback")
 	req3 := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
-	_, err = client.VerifyCallback(context.Background(), req3)
+	_, err = client.VerifyCallback(context.Background(), req3, "https://example.com/auth/openid/callback")
 	if err == nil {
 		t.Error("expected error for missing nonce")
 	}
@@ -411,13 +419,15 @@ func TestVerifyCallback_InvalidSignature(t *testing.T) {
 	defer server.Close()
 
 	client := openid.NewClient(server.URL, "", server.Client())
+	returnTo := "https://example.com/auth/openid/callback"
 
 	q := url.Values{}
 	q.Set("openid.mode", "id_res")
+	q.Set("openid.return_to", returnTo)
 	q.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"extra")
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
-	_, err := client.VerifyCallback(context.Background(), req)
+	_, err := client.VerifyCallback(context.Background(), req, returnTo)
 	if err == nil {
 		t.Fatal("expected error for is_valid:false, got nil")
 	}
@@ -433,16 +443,239 @@ func TestVerifyCallback_ServerError(t *testing.T) {
 	defer server.Close()
 
 	client := openid.NewClient(server.URL, "", server.Client())
+	returnTo := "https://example.com/auth/openid/callback"
 
 	q := url.Values{}
 	q.Set("openid.mode", "id_res")
+	q.Set("openid.return_to", returnTo)
 	q.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"extra")
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
-	_, err := client.VerifyCallback(context.Background(), req)
+	_, err := client.VerifyCallback(context.Background(), req, returnTo)
 	if err == nil {
 		t.Fatal("expected error on 500 response, got nil")
 	}
+}
+
+func TestVerifyCallback_ReturnToMismatch(t *testing.T) {
+	client := openid.NewClient("https://login.ubuntu.com/+openid", "", nil)
+
+	q := url.Values{}
+	q.Set("openid.mode", "id_res")
+	q.Set("openid.return_to", "https://example.com/auth/openid/callback?state=expected-state")
+
+	req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
+	_, err := client.VerifyCallback(context.Background(), req, "https://example.com/auth/openid/callback?state=different-state")
+	if err == nil {
+		t.Fatal("expected error on return_to mismatch, got nil")
+	}
+	if !strings.Contains(err.Error(), "return_to mismatch") {
+		t.Errorf("expected return_to mismatch error, got: %v", err)
+	}
+}
+
+func TestVerifyCallback_MissingReturnTo(t *testing.T) {
+	client := openid.NewClient("https://login.ubuntu.com/+openid", "", nil)
+
+	q := url.Values{}
+	q.Set("openid.mode", "id_res")
+	// No openid.return_to set
+
+	req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
+	_, err := client.VerifyCallback(context.Background(), req, "https://example.com/auth/openid/callback")
+	if err == nil {
+		t.Fatal("expected error on missing return_to, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing openid.return_to") {
+		t.Errorf("expected missing return_to error, got: %v", err)
+	}
+}
+
+func TestVerifyCallback_NonceReplay(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("is_valid:true\n"))
+	}))
+	defer server.Close()
+
+	client := openid.NewClient(server.URL, "", server.Client())
+	returnTo := "https://example.com/auth/openid/callback"
+
+	q := url.Values{}
+	q.Set("openid.mode", "id_res")
+	q.Set("openid.return_to", returnTo)
+	nonce := time.Now().UTC().Format(time.RFC3339) + "unique-token"
+	q.Set("openid.response_nonce", nonce)
+
+	req1 := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
+	_, err := client.VerifyCallback(context.Background(), req1, returnTo)
+	if err != nil {
+		t.Fatalf("first verification failed: %v", err)
+	}
+
+	req2 := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
+	_, err = client.VerifyCallback(context.Background(), req2, returnTo)
+	if err == nil {
+		t.Fatal("expected error on nonce replay, got nil")
+	}
+	if !strings.Contains(err.Error(), "replay detected") {
+		t.Errorf("expected replay detected error, got: %v", err)
+	}
+}
+
+func TestVerifyCallback_TimestampSkew(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("is_valid:true\n"))
+	}))
+	defer server.Close()
+
+	client := openid.NewClient(server.URL, "", server.Client())
+	returnTo := "https://example.com/auth/openid/callback"
+
+	tests := []struct {
+		name      string
+		timestamp time.Time
+		wantErr   bool
+	}{
+		{
+			name:      "6 minutes in past",
+			timestamp: time.Now().UTC().Add(-6 * time.Minute),
+			wantErr:   true,
+		},
+		{
+			name:      "6 minutes in future",
+			timestamp: time.Now().UTC().Add(6 * time.Minute),
+			wantErr:   true,
+		},
+		{
+			name:      "2 minutes in past",
+			timestamp: time.Now().UTC().Add(-2 * time.Minute),
+			wantErr:   false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			q := url.Values{}
+			q.Set("openid.mode", "id_res")
+			q.Set("openid.return_to", returnTo)
+			q.Set("openid.response_nonce", tc.timestamp.Format(time.RFC3339)+tc.name)
+
+			req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
+			_, err := client.VerifyCallback(context.Background(), req, returnTo)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected timestamp skew error, got nil")
+				}
+				if !strings.Contains(err.Error(), "acceptable skew") {
+					t.Errorf("expected acceptable skew error, got: %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error for valid skew: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestVerifyCallback_ProviderNon200(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusNotFound, http.StatusBadGateway} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer server.Close()
+
+			client := openid.NewClient(server.URL, "", server.Client())
+			returnTo := "https://example.com/auth/openid/callback"
+
+			q := url.Values{}
+			q.Set("openid.mode", "id_res")
+			q.Set("openid.return_to", returnTo)
+			q.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"extra")
+
+			req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
+			_, err := client.VerifyCallback(context.Background(), req, returnTo)
+			if err == nil {
+				t.Fatalf("expected error for status %d, got nil", status)
+			}
+			if !strings.Contains(err.Error(), fmt.Sprintf("status %d", status)) {
+				t.Errorf("expected error mentioning status %d, got: %v", status, err)
+			}
+		})
+	}
+}
+
+func TestVerifyCallback_SREGFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("is_valid:true\n"))
+	}))
+	defer server.Close()
+
+	client := openid.NewClient(server.URL, "", server.Client())
+	returnTo := "https://example.com/auth/openid/callback"
+
+	t.Run("SREG attributes only without AX", func(t *testing.T) {
+		q := url.Values{}
+		q.Set("openid.mode", "id_res")
+		q.Set("openid.return_to", returnTo)
+		q.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"sregonly")
+		q.Set("openid.claimed_id", "https://login.ubuntu.com/+id/sreg1")
+		q.Set("openid.sreg.email", "sreg@canonical.com")
+		q.Set("openid.sreg.nickname", "sreguser")
+		q.Set("openid.sreg.fullname", "SREG User")
+
+		req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
+		claims, err := client.VerifyCallback(context.Background(), req, returnTo)
+		if err != nil {
+			t.Fatalf("VerifyCallback failed: %v", err)
+		}
+		if claims.Email != "sreg@canonical.com" {
+			t.Errorf("Email: got %q, want sreg@canonical.com", claims.Email)
+		}
+		if claims.Nickname != "sreguser" {
+			t.Errorf("Nickname: got %q, want sreguser", claims.Nickname)
+		}
+		if claims.FullName != "SREG User" {
+			t.Errorf("FullName: got %q, want SREG User", claims.FullName)
+		}
+	})
+
+	t.Run("Mixed AX and SREG fallback", func(t *testing.T) {
+		q := url.Values{}
+		q.Set("openid.mode", "id_res")
+		q.Set("openid.return_to", returnTo)
+		q.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"mixed")
+		q.Set("openid.claimed_id", "https://login.ubuntu.com/+id/mixed1")
+		// Email in AX
+		q.Set("openid.ns.ax", openid.AXNS)
+		q.Set("openid.ax.type.email", openid.AXSchemaEmail)
+		q.Set("openid.ax.value.email", "mixed-ax@canonical.com")
+		// Nickname and FullName in SREG
+		q.Set("openid.sreg.nickname", "mixednick")
+		q.Set("openid.sreg.fullname", "Mixed Fullname")
+
+		req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
+		claims, err := client.VerifyCallback(context.Background(), req, returnTo)
+		if err != nil {
+			t.Fatalf("VerifyCallback failed: %v", err)
+		}
+		if claims.Email != "mixed-ax@canonical.com" {
+			t.Errorf("Email: got %q, want mixed-ax@canonical.com", claims.Email)
+		}
+		if claims.Nickname != "mixednick" {
+			t.Errorf("Nickname: got %q, want mixednick", claims.Nickname)
+		}
+		if claims.FullName != "Mixed Fullname" {
+			t.Errorf("FullName: got %q, want Mixed Fullname", claims.FullName)
+		}
+	})
 }
 
 func TestClaims_UserIDHierarchy(t *testing.T) {

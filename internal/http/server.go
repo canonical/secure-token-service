@@ -81,27 +81,27 @@ type Server struct {
 	server          *http.Server
 }
 
+const defaultAuthProvider = "oidc"
+
+var fallbackLogger = zap.NewNop()
+
 // logger returns the zap logger from observability, or creates a new one if not available
 func (s *Server) logger(ctx context.Context) *zap.Logger {
 	if s.observability != nil && s.observability.Logger != nil {
 		return s.observability.Logger.FromContext(ctx)
 	}
-	// Return a new logger if observability is not set up
-	logger, err := observability.NewLogger("info", false)
-	if err != nil {
-		return zap.NewNop()
-	}
-	return logger.Logger
+	return fallbackLogger
 }
 
 // NewServer creates a new HTTP server with optional observability and configuration options.
 func NewServer(store session.Store, km KeyManager, cm AuthCookieManager, provider OIDCProvider, obs *observability.Observability, opts ...ServerOption) *Server {
 	s := &Server{
-		sessionStore:  store,
-		keyManager:    km,
-		cookieManager: cm,
-		oidcProvider:  provider,
-		observability: obs,
+		sessionStore:    store,
+		keyManager:      km,
+		cookieManager:   cm,
+		oidcProvider:    provider,
+		defaultProvider: defaultAuthProvider,
+		observability:   obs,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -193,6 +193,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
+// isSecureRequest checks whether the incoming request used TLS or was forwarded as HTTPS.
+func isSecureRequest(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
 // isValidReturnTo validates that returnTo is a safe redirect target to prevent open redirect vulnerabilities.
 func (s *Server) isValidReturnTo(returnTo string, reqHost string) bool {
 	// Empty string defaults to "/" (valid).
@@ -256,12 +261,10 @@ func (s *Server) isValidReturnTo(returnTo string, reqHost string) bool {
 		return true
 	}
 
-	if s != nil {
-		for _, allowed := range s.allowedHosts {
-			trimmed := strings.TrimSpace(allowed)
-			if trimmed != "" && matchHost(u.Host, uHostname, trimmed) {
-				return true
-			}
+	for _, allowed := range s.allowedHosts {
+		trimmed := strings.TrimSpace(allowed)
+		if trimmed != "" && matchHost(u.Host, uHostname, trimmed) {
+			return true
 		}
 	}
 
@@ -294,7 +297,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		if s.defaultProvider != "" {
 			provider = s.defaultProvider
 		} else {
-			provider = "oidc"
+			provider = defaultAuthProvider
 		}
 	}
 
@@ -348,7 +351,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 		// OpenID return_to URL pointing to /auth/openid/callback
 		scheme := "http"
-		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		if isSecureRequest(r) {
 			scheme = "https"
 		}
 		returnToCallback := fmt.Sprintf("%s://%s/auth/openid/callback", scheme, r.Host)
@@ -373,6 +376,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	// 0. Check for OIDC errors
 	if oidcError := r.URL.Query().Get("error"); oidcError != "" {
+		if s.cookieManager != nil {
+			s.cookieManager.ClearAuthState(w, r)
+		}
 		description := r.URL.Query().Get("error_description")
 		s.logger(r.Context()).Error("OIDC login failed",
 			zap.String("error", oidcError),
@@ -388,7 +394,6 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid state", http.StatusBadRequest)
 		return
 	}
-	s.cookieManager.ClearAuthState(w, r)
 
 	if r.URL.Query().Get("state") != stateData.State {
 		http.Error(w, "State mismatch", http.StatusBadRequest)
@@ -399,6 +404,8 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Provider mismatch", http.StatusBadRequest)
 		return
 	}
+
+	s.cookieManager.ClearAuthState(w, r)
 
 	// 2. Exchange code
 	code := r.URL.Query().Get("code")
@@ -423,7 +430,8 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	idToken, err := s.oidcProvider.VerifyIDToken(r.Context(), rawIDToken)
 	if err != nil {
-		http.Error(w, "Failed to verify ID Token: "+err.Error(), http.StatusInternalServerError)
+		s.logger(r.Context()).Error("failed to verify ID token", zap.Error(err))
+		http.Error(w, "Failed to verify ID Token", http.StatusInternalServerError)
 		return
 	}
 
@@ -496,11 +504,17 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleOpenIDCallback(w http.ResponseWriter, r *http.Request) {
 	// 0. Check for user cancellation or errors
 	if r.URL.Query().Get("openid.mode") == "cancel" {
+		if s.cookieManager != nil {
+			s.cookieManager.ClearAuthState(w, r)
+		}
 		s.logger(r.Context()).Warn("OpenID authentication cancelled by user")
 		http.Error(w, "Login cancelled", http.StatusBadRequest)
 		return
 	}
 	if errParam := r.URL.Query().Get("error"); errParam != "" {
+		if s.cookieManager != nil {
+			s.cookieManager.ClearAuthState(w, r)
+		}
 		s.logger(r.Context()).Error("OpenID login failed with error", zap.String("error", errParam))
 		http.Error(w, fmt.Sprintf("Login failed: %s", errParam), http.StatusBadRequest)
 		return
@@ -519,7 +533,6 @@ func (s *Server) handleOpenIDCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid state", http.StatusBadRequest)
 		return
 	}
-	s.cookieManager.ClearAuthState(w, r)
 
 	if r.URL.Query().Get("state") != stateData.State {
 		http.Error(w, "State mismatch", http.StatusBadRequest)
@@ -531,11 +544,29 @@ func (s *Server) handleOpenIDCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.cookieManager.ClearAuthState(w, r)
+
 	// 2. Direct verification with OpenID Provider (check_authentication)
-	claims, err := s.openIDProvider.VerifyCallback(r.Context(), r)
+	scheme := "http"
+	if isSecureRequest(r) {
+		scheme = "https"
+	}
+	cbURL := &url.URL{
+		Scheme: scheme,
+		Host:   r.Host,
+		Path:   "/auth/openid/callback",
+	}
+	if stateData.State != "" {
+		q := cbURL.Query()
+		q.Set("state", stateData.State)
+		cbURL.RawQuery = q.Encode()
+	}
+	expectedReturnTo := cbURL.String()
+
+	claims, err := s.openIDProvider.VerifyCallback(r.Context(), r, expectedReturnTo)
 	if err != nil {
 		s.logger(r.Context()).Error("failed to verify OpenID callback", zap.Error(err))
-		http.Error(w, "OpenID verification failed: "+err.Error(), http.StatusBadRequest)
+		http.Error(w, "OpenID verification failed", http.StatusBadRequest)
 		return
 	}
 

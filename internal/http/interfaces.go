@@ -82,6 +82,6 @@ type OIDCProvider interface {
 // OpenIDProvider defines the interface for OpenID 2.0 provider operations
 type OpenIDProvider interface {
 	BuildAuthURL(returnToURL, stateToken string) (string, error)
-	VerifyCallback(ctx context.Context, r *http.Request) (*openid.Claims, error)
+	VerifyCallback(ctx context.Context, r *http.Request, expectedReturnTo string) (*openid.Claims, error)
 }
 

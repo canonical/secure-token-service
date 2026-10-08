@@ -206,15 +206,15 @@ func renderUnauthenticatedHome(w http.ResponseWriter) {
 func renderAuthenticatedHome(w http.ResponseWriter, sess *session.Session) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	// Mask tokens for security (show last 10 chars)
+	// Mask tokens for security (show first 4 and last 4 chars for long tokens)
 	maskToken := func(token string) string {
 		if token == "" {
 			return "N/A"
 		}
-		if len(token) <= 10 {
+		if len(token) <= 12 {
 			return "***"
 		}
-		return "..." + token[len(token)-10:]
+		return token[:4] + "..." + token[len(token)-4:]
 	}
 
 	accessToken := maskToken(sess.AccessToken)

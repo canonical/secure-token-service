@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"time"
 
@@ -21,6 +20,14 @@ import (
 var ErrKeyTooShort = errors.New("cookie key is too short: minimum length is 32 bytes")
 
 const MinKeyLength = 32
+
+// headerRecorder is a minimal http.ResponseWriter that records headers in an http.Header map
+// without requiring net/http/httptest in production code.
+type headerRecorder http.Header
+
+func (h headerRecorder) Header() http.Header         { return http.Header(h) }
+func (h headerRecorder) Write(b []byte) (int, error) { return len(b), nil }
+func (h headerRecorder) WriteHeader(statusCode int)  {}
 
 // AuthState holds state data across the authentication redirection flow.
 type AuthState struct {
@@ -107,12 +114,13 @@ func (m *CookieManager) Encode(name string, value string) (string, error) {
 		return "", fmt.Errorf("failed to create cookie object: %w", err)
 	}
 
-	recorder := httptest.NewRecorder()
+	recorder := make(headerRecorder)
 	if err := obj.SetValue(recorder, []byte(value)); err != nil {
 		return "", err
 	}
 
-	cookies := recorder.Result().Cookies()
+	resp := &http.Response{Header: recorder.Header()}
+	cookies := resp.Cookies()
 	if len(cookies) == 0 {
 		return "", fmt.Errorf("no cookie generated")
 	}
@@ -134,10 +142,7 @@ func (m *CookieManager) Decode(name, value string) (string, error) {
 		return "", fmt.Errorf("failed to create cookie object: %w", err)
 	}
 
-	req, err := http.NewRequest("GET", "/", nil)
-	if err != nil {
-		return "", err
-	}
+	req := &http.Request{Header: make(http.Header)}
 	req.AddCookie(&http.Cookie{
 		Name:  name,
 		Value: value,
@@ -167,7 +172,9 @@ func (m *CookieManager) SetSessionCookie(w http.ResponseWriter, r *http.Request,
 		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	}
-	http.SetCookie(w, cookie)
+	if v := cookie.String(); v != "" {
+		w.Header().Add("Set-Cookie", v)
+	}
 	return nil
 }
 
@@ -309,34 +316,31 @@ func (m *CookieManager) deleteSecureCookie(w http.ResponseWriter, r *http.Reques
 		Secure:   isSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	}
-	http.SetCookie(w, cookie)
+	if v := cookie.String(); v != "" {
+		w.Header().Add("Set-Cookie", v)
+	}
 }
 
 // setSecureCookieValue sets a cookie value with dynamic Secure flag based on request
 func (m *CookieManager) setSecureCookieValue(w http.ResponseWriter, r *http.Request, ck *securecookie.Obj, value []byte) error {
 	isSecure := isSecureRequest(r)
 
-	// If the cookie is already configured with the right secure setting, use it directly
-	if ck.Secure() == isSecure {
-		return ck.SetValue(w, value)
-	}
-
-	// We need to manually set the cookie with the correct Secure flag
-	// First, encode the value using httptest.NewRecorder()
-	recorder := httptest.NewRecorder()
+	recorder := make(headerRecorder)
 	if err := ck.SetValue(recorder, value); err != nil {
 		return err
 	}
 
-	setCookie := recorder.Header().Get("Set-Cookie")
-	if setCookie == "" {
+	resp := &http.Response{Header: recorder.Header()}
+	cookies := resp.Cookies()
+	if len(cookies) == 0 {
 		return fmt.Errorf("failed to set cookie: no Set-Cookie header")
 	}
 
-	if isSecure && !ck.Secure() {
-		setCookie += "; Secure"
-	}
+	cookie := cookies[0]
+	cookie.Secure = isSecure
 
-	w.Header().Add("Set-Cookie", setCookie)
+	if v := cookie.String(); v != "" {
+		w.Header().Add("Set-Cookie", v)
+	}
 	return nil
 }

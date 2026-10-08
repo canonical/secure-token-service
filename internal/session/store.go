@@ -6,11 +6,15 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/valkey-io/valkey-go"
 )
+
+// ErrSessionNotFound is returned when a requested session is not found in the store.
+var ErrSessionNotFound = errors.New("session not found")
 
 // Session represents a user session with upstream tokens.
 type Session struct {
@@ -88,7 +92,7 @@ func (s *ValkeyStore) Get(ctx context.Context, sessionID string) (*Session, erro
 	data, err := s.client.Do(ctx, s.client.B().Get().Key(key).Build()).AsBytes()
 	if err != nil {
 		if valkey.IsValkeyNil(err) {
-			return nil, fmt.Errorf("session not found")
+			return nil, ErrSessionNotFound
 		}
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}

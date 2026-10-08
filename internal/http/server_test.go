@@ -864,9 +864,6 @@ func TestHandleCallback(t *testing.T) {
 			GetAuthState(gomock.Any()).
 			Return(&cookie.AuthState{State: "expected-state", Provider: "oidc"}, nil)
 
-		cookieManager.EXPECT().
-			ClearAuthState(gomock.Any(), gomock.Any())
-
 		req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=wrong-state&code=mock-code", nil)
 		w := httptest.NewRecorder()
 
@@ -890,9 +887,6 @@ func TestHandleCallback(t *testing.T) {
 		cookieManager.EXPECT().
 			GetAuthState(gomock.Any()).
 			Return(&cookie.AuthState{State: "mock-state", Provider: "openid"}, nil)
-
-		cookieManager.EXPECT().
-			ClearAuthState(gomock.Any(), gomock.Any())
 
 		req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=mock-state&code=mock-code", nil)
 		w := httptest.NewRecorder()
@@ -1016,7 +1010,7 @@ func TestHandleOpenIDCallback(t *testing.T) {
 		}
 
 		openIDProvider.EXPECT().
-			VerifyCallback(gomock.Any(), gomock.Any()).
+			VerifyCallback(gomock.Any(), gomock.Any(), gomock.Any()).
 			Return(mockClaims, nil)
 
 		store.EXPECT().
@@ -1136,9 +1130,6 @@ func TestHandleOpenIDCallback(t *testing.T) {
 			GetAuthState(gomock.Any()).
 			Return(&cookie.AuthState{State: "stored-state", Provider: "openid"}, nil)
 
-		cookieManager.EXPECT().
-			ClearAuthState(gomock.Any(), gomock.Any())
-
 		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=incoming-state", nil)
 		w := httptest.NewRecorder()
 
@@ -1164,9 +1155,6 @@ func TestHandleOpenIDCallback(t *testing.T) {
 		cookieManager.EXPECT().
 			GetAuthState(gomock.Any()).
 			Return(&cookie.AuthState{State: "mock-state", Provider: "oidc"}, nil)
-
-		cookieManager.EXPECT().
-			ClearAuthState(gomock.Any(), gomock.Any())
 
 		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=mock-state", nil)
 		w := httptest.NewRecorder()
@@ -1198,8 +1186,8 @@ func TestHandleOpenIDCallback(t *testing.T) {
 			ClearAuthState(gomock.Any(), gomock.Any())
 
 		openIDProvider.EXPECT().
-			VerifyCallback(gomock.Any(), gomock.Any()).
-			Return(nil, errors.New("openid verification failed"))
+			VerifyCallback(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, errors.New("secret provider error detail"))
 
 		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=mock-state", nil)
 		w := httptest.NewRecorder()
@@ -1208,6 +1196,12 @@ func TestHandleOpenIDCallback(t *testing.T) {
 
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "OpenID verification failed") {
+			t.Errorf("Expected 'OpenID verification failed', got %s", w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "secret provider error detail") {
+			t.Errorf("Error leaked internal details: %s", w.Body.String())
 		}
 	})
 
@@ -1228,7 +1222,7 @@ func TestHandleOpenIDCallback(t *testing.T) {
 			ClearAuthState(gomock.Any(), gomock.Any())
 
 		openIDProvider.EXPECT().
-			VerifyCallback(gomock.Any(), gomock.Any()).
+			VerifyCallback(gomock.Any(), gomock.Any(), gomock.Any()).
 			Return(&openid.Claims{}, nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=mock-state", nil)
@@ -1266,7 +1260,7 @@ func TestHandleOpenIDCallback(t *testing.T) {
 		}
 
 		openIDProvider.EXPECT().
-			VerifyCallback(gomock.Any(), gomock.Any()).
+			VerifyCallback(gomock.Any(), gomock.Any(), gomock.Any()).
 			Return(mockClaims, nil)
 
 		store.EXPECT().

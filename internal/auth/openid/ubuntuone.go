@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,6 +35,49 @@ const (
 	// AXSchemaFullname is the AX schema URI for user full person name.
 	AXSchemaFullname = "http://axschema.org/namePerson"
 )
+
+// NonceCache defines an interface for tracking and preventing replay of OpenID response_nonces.
+type NonceCache interface {
+	CheckAndRecord(nonce string, ttl time.Duration) bool
+}
+
+// MemoryNonceCache is a thread-safe in-memory implementation of NonceCache.
+type MemoryNonceCache struct {
+	mu      sync.Mutex
+	entries map[string]time.Time
+}
+
+// NewMemoryNonceCache creates a new in-memory nonce cache.
+func NewMemoryNonceCache() *MemoryNonceCache {
+	return &MemoryNonceCache{
+		entries: make(map[string]time.Time),
+	}
+}
+
+// CheckAndRecord checks if the nonce is already recorded (not expired).
+// If seen, it returns false (replay detected).
+// If not seen or expired, it records the nonce with expiration now + ttl and returns true.
+// It also prunes expired entries on write to prevent unbounded memory growth.
+func (c *MemoryNonceCache) CheckAndRecord(nonce string, ttl time.Duration) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	now := time.Now()
+
+	// Prune expired entries
+	for k, exp := range c.entries {
+		if now.After(exp) {
+			delete(c.entries, k)
+		}
+	}
+
+	if exp, exists := c.entries[nonce]; exists && now.Before(exp) {
+		return false
+	}
+
+	c.entries[nonce] = now.Add(ttl)
+	return true
+}
 
 // HTTPClient defines an interface for executing HTTP requests, allowing mockability in tests.
 type HTTPClient interface {
@@ -92,6 +136,7 @@ type Client struct {
 	providerURL string
 	realm       string
 	httpClient  HTTPClient
+	nonceCache  NonceCache
 }
 
 // NewClient creates a new Ubuntu One OpenID client.
@@ -106,7 +151,14 @@ func NewClient(providerURL, realm string, httpClient HTTPClient) *Client {
 		providerURL: providerURL,
 		realm:       realm,
 		httpClient:  httpClient,
+		nonceCache:  NewMemoryNonceCache(),
 	}
+}
+
+// WithNonceCache sets a custom NonceCache on the client.
+func (c *Client) WithNonceCache(nc NonceCache) *Client {
+	c.nonceCache = nc
+	return c
 }
 
 // ProviderURL returns the configured OpenID provider endpoint.
@@ -177,7 +229,7 @@ func (c *Client) BuildAuthURL(returnToURL, stateToken string) (string, error) {
 }
 
 // VerifyCallback verifies an OpenID 2.0 callback response via direct HTTP POST (check_authentication).
-func (c *Client) VerifyCallback(ctx context.Context, r *http.Request) (*Claims, error) {
+func (c *Client) VerifyCallback(ctx context.Context, r *http.Request, expectedReturnTo string) (*Claims, error) {
 	q := r.URL.Query()
 
 	mode := q.Get("openid.mode")
@@ -191,6 +243,14 @@ func (c *Client) VerifyCallback(ctx context.Context, r *http.Request) (*Claims, 
 		return nil, fmt.Errorf("unexpected openid.mode: %s", mode)
 	}
 
+	returnTo := q.Get("openid.return_to")
+	if returnTo == "" {
+		return nil, errors.New("openid: missing openid.return_to in callback")
+	}
+	if expectedReturnTo != "" && returnTo != expectedReturnTo {
+		return nil, fmt.Errorf("openid: return_to mismatch: got %q, expected %q", returnTo, expectedReturnTo)
+	}
+
 	nonce := q.Get("openid.response_nonce")
 	if nonce == "" {
 		return nil, errors.New("missing openid.response_nonce in callback")
@@ -199,10 +259,14 @@ func (c *Client) VerifyCallback(ctx context.Context, r *http.Request) (*Claims, 
 	if len(nonce) >= 20 {
 		if t, err := time.Parse(time.RFC3339, nonce[:20]); err == nil {
 			skew := time.Since(t)
-			if skew < -5*time.Minute || skew > 10*time.Minute {
+			if skew < -5*time.Minute || skew > 5*time.Minute {
 				return nil, fmt.Errorf("openid response_nonce timestamp out of acceptable skew: %v", t)
 			}
 		}
+	}
+
+	if c.nonceCache != nil && !c.nonceCache.CheckAndRecord(nonce, 10*time.Minute) {
+		return nil, fmt.Errorf("openid response_nonce replay detected: %s", nonce)
 	}
 
 	// Prepare direct verification request parameters:
