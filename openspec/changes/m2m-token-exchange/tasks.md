@@ -7,8 +7,8 @@
 
 ## 2. Upstream IdP JWKS Preemptive Verifier
 
-- [ ] 2.1 Implement `HydraTokenVerifier` in `internal/auth/hydra.go` (or `internal/auth/verifier.go`) using `lestrrat-go/jwx/v2/jwk.Cache` to preemptively synchronize and refresh Hydra's JWKS on a background interval. Implement lifecycle management (`Close() error` / context cancellation) to prevent background goroutine leaks on shutdown. Verify with unit tests in `internal/auth/hydra_test.go` using a mock HTTP JWKS endpoint.
-- [ ] 2.2 Add token signature validation, expiration checking, clock skew tolerance (5s), and subject extraction logic. Ensure tokens with `< 60s` remaining lifetime are rejected. Verify with unit tests testing valid, expired, near-expired (<60s), malformed, and wrong-signature tokens.
+- [x] 2.1 Implement `HydraTokenVerifier` in `internal/auth/hydra.go` (or `internal/auth/verifier.go`) using `lestrrat-go/jwx/v2/jwk.Cache` to preemptively synchronize and refresh Hydra's JWKS on a background interval. Implement lifecycle management (`Close() error` / context cancellation) to prevent background goroutine leaks on shutdown. Verify with unit tests in `internal/auth/hydra_test.go` using a mock HTTP JWKS endpoint.
+- [x] 2.2 Add token signature validation, expiration checking, clock skew tolerance (5s), and subject extraction logic. Ensure tokens with `< 60s` remaining lifetime are rejected. Verify with unit tests testing valid, expired, near-expired (<60s), malformed, and wrong-signature tokens.
 
 ## 3. gRPC Server Token Exchange Implementation
 
