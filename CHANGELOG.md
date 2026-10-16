@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.7.0](https://github.com/canonical/secure-token-service/compare/v0.6.0...v0.7.0) (2026-10-16)
+
+
+### Features
+
+* **auth:** add Hydra token verifier with preemptive JWKS caching ([983d3db](https://github.com/canonical/secure-token-service/commit/983d3db971515c195dfa1c64b9862ac16ba05ad7))
+* **auth:** implement Ubuntu One OpenID 2.0 client and claims extraction ([80eb98f](https://github.com/canonical/secure-token-service/commit/80eb98fa3956deeec5e78ae2bdfde20af742cb75))
+* **build:** support amd64, arm64, and riscv64 Go binary compilation ([9d77f23](https://github.com/canonical/secure-token-service/commit/9d77f23a67d0b257430d74d0e3dafa6cff5a7c98))
+* **build:** support multi-arch binaries (amd64, arm64, riscv64) and rocks (amd64, arm64) ([#52](https://github.com/canonical/secure-token-service/issues/52)) ([3b09e93](https://github.com/canonical/secure-token-service/commit/3b09e93ef4fc6f793a8a81edecb6754b1cd4fbbd))
+* **ci:** shift-left vulnerability check & release quarantine gate ([e55ad87](https://github.com/canonical/secure-token-service/commit/e55ad8714496695a102a9860642561a2a2024bbf))
+* **ci:** shift-left vulnerability check & release quarantine gate ([#34](https://github.com/canonical/secure-token-service/issues/34)) ([c90af84](https://github.com/canonical/secure-token-service/commit/c90af8495fcfb87c5205f9128e8c092a7e028ec0))
+* **config,session:** add Ubuntu One config and extend Session with Provider and Claims ([68b7564](https://github.com/canonical/secure-token-service/commit/68b756459769c42802856a14e7d1e95727dfd751))
+* **cookie:** standardize session and auth state cookies with dynamic TLS security ([fa476f5](https://github.com/canonical/secure-token-service/commit/fa476f5889f7e8c3267d07f431f44e1ffccddc40))
+* **grpc:** implement ExchangeToken RPC for IdP client credentials token exchange ([#47](https://github.com/canonical/secure-token-service/issues/47)) ([cfb972a](https://github.com/canonical/secure-token-service/commit/cfb972a3a2b818518c2eda8cb43f175e0f3b83dc)), closes [#44](https://github.com/canonical/secure-token-service/issues/44)
+* **grpc:** implement ExchangeToken RPC with expiration clamping and synthetic email ([4ee3f3c](https://github.com/canonical/secure-token-service/commit/4ee3f3c762ff302a7e85cf49de419fe7a101afe1))
+* **grpc:** propagate normalized session claims into internal JWT ([1f4056e](https://github.com/canonical/secure-token-service/commit/1f4056ea823c43c5d3e0f38085631693b04952fb))
+* **http:** add /auth/openid/callback and support provider switching in /auth/login ([723d476](https://github.com/canonical/secure-token-service/commit/723d47612f4794281d68be0ad79c988ff907044b))
+* **http:** enable multi-provider selection in dummy frontend for local testing ([6199fc9](https://github.com/canonical/secure-token-service/commit/6199fc9b3e6ce8f865bcdc950a59402d4f0fb07d))
+* **observability:** add M2M token exchange metrics and update gRPC documentation ([5f4b1bd](https://github.com/canonical/secure-token-service/commit/5f4b1bd91fcef8946d461be3228cfb7aa84b11ca))
+* **proto:** define ExchangeToken RPC and ExchangeTokenRequest message ([9e54cb5](https://github.com/canonical/secure-token-service/commit/9e54cb5c1dddacfe43b51f8ba12fffdba3b107cc))
+* **rock:** support amd64 and arm64 in rockcraft and container build configs ([dc04dd8](https://github.com/canonical/secure-token-service/commit/dc04dd85c277ea1b45ec445ebae19f0462a18481))
+* **spec:** add specification for m2m client credentials token exchange ([#44](https://github.com/canonical/secure-token-service/issues/44)) ([171fb55](https://github.com/canonical/secure-token-service/commit/171fb5584783716295a04669f3eedeb75b80f5d4))
+* **spec:** add specification for ubuntu one openid support and standardized cookies ([3ba2728](https://github.com/canonical/secure-token-service/commit/3ba2728aed477feeab4038edcda12ec5a6f57f5b))
+
+
+### Bug Fixes
+
+* **build:** address review feedback on multi-arch builds and specs ([2019588](https://github.com/canonical/secure-token-service/commit/2019588d702b689fde15c9ae1d824272cd937189))
+* **ci:** address PR review comments and bump identity-team workflows to v1.17.1 ([95af510](https://github.com/canonical/secure-token-service/commit/95af5107d99890ec4df35e1a10ffbbab25095ddf))
+* **deploy:** configure skaffold with podman and rockcraft skopeo, align otel semconv ([b4426b8](https://github.com/canonical/secure-token-service/commit/b4426b8950f5d892bdf1631cc086c769608ad218))
+* **grpc:** enforce max token size, validate machine claims, add audit logging, and manage verifier lifecycle ([2b13e6c](https://github.com/canonical/secure-token-service/commit/2b13e6cebd1e5f8b8393442c1988b5165d49de9d))
+* resolve CodeQL cookie alerts and OpenCode review issues for Ubuntu One OpenID ([30c7d19](https://github.com/canonical/secure-token-service/commit/30c7d1955e81d1e62c91aca04fbed9f1d0f3e215))
+
 ## [0.6.0](https://github.com/canonical/secure-token-service/compare/v0.5.0...v0.6.0) (2026-09-10)
 
 
