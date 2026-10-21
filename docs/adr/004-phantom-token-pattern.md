@@ -28,7 +28,7 @@ We implement the **Phantom Token Pattern** where:
 **Internal Layer (Gateway ↔ Services)**:
 - Short-lived JWTs (configurable expiry)
 - Signed with ES256 (ECDSA with P-256 curve)
-- Services verify locally (no network call to Janus)
+- Services verify locally (no network call to STS)
 - Each request gets fresh JWT with current session state
 
 ### Performance
@@ -40,7 +40,7 @@ We implement the **Phantom Token Pattern** where:
 
 **Scalability**:
 - Stateless verification at service layer
-- Session store (Valkey) accessed only by Gateway + Janus
+- Session store (Valkey) accessed only by Gateway + STS
 - Services don't need direct access to external IdP
 
 ### Revocation
@@ -56,7 +56,7 @@ POST /auth/logout
 **Existing JWTs**:
 - Still valid until expiry (design trade-off)
 - Expiry kept short (recommended: 5-15 minutes)
-- For critical operations, services can call-back to Janus for session validation
+- For critical operations, services can call-back to STS for session validation
 
 ### Separation of Concerns
 
@@ -70,7 +70,7 @@ POST /auth/logout
                       ↓
 ┌─────────────────────────────────────────────────┐
 │ API Gateway (e.g., Envoy, Nginx)                │
-│ • Exchange: cookie → JWT (gRPC to Janus)       │
+│ • Exchange: cookie → JWT (gRPC to STS)       │
 │ • Forward: JWT in X-Internal-Authorization      │
 │ • No session storage dependency                 │
 └─────────────────────────────────────────────────┘

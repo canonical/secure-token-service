@@ -3,7 +3,7 @@
 ## Purpose
 Standardizes the generation, attributes, and clearing of all authentication and session cookies across the service to eliminate configuration drift, prevent cross-site scripting (XSS) and cross-site request forgery (CSRF), and ensure proper behavior across both HTTPS and local development environments.
 
-For architectural diagrams and component details, see [Architecture Design: Standardized Cookie Pipeline](../../design.md#standardized-cookie-architecture).
+For architectural diagrams and component details, see [Architecture Design: Standardized Cookie Pipeline](../../changes/archive/2026-10-29-support-ubuntu-one-openid/design.md#standardized-cookie-architecture).
 
 ## Requirements
 
