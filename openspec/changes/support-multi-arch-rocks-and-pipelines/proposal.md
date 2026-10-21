@@ -34,7 +34,7 @@ The Secure Token Service now builds its Go binary and container rock only for `a
 
 ## Impact
 
-- **Rock Configuration**: [rockcraft.yaml](rockcraft.yaml) (`platforms` for `amd64` and `arm64`, and `parts.go-build.override-build`).
-- **CI Workflows**: [.github/workflows/ci.yaml](.github/workflows/ci.yaml) and [.github/workflows/unittest.yaml](.github/workflows/unittest.yaml).
-- **Build & Developer Tooling**: [Makefile](Makefile), [Dockerfile](Dockerfile), [build.sh](build.sh), and [skaffold.yaml](skaffold.yaml).
+- **Rock Configuration**: [rockcraft.yaml](../../../rockcraft.yaml) (`platforms` for `amd64` and `arm64`, and `parts.go-build.override-build`).
+- **CI Workflows**: [.github/workflows/ci.yaml](../../../.github/workflows/ci.yaml) and [.github/workflows/unittest.yaml](../../../.github/workflows/unittest.yaml).
+- **Build & Developer Tooling**: [Makefile](../../../Makefile), [Dockerfile](../../../Dockerfile), [build.sh](../../../build.sh), and [skaffold.yaml](../../../skaffold.yaml).
 - **Upstream Reusable Workflows**: `canonical/identity-team` (`_rock-build.yaml`, `_rock-gh-publish.yaml`, `_rock-scan.yaml`, `_rock-promote.yaml`).

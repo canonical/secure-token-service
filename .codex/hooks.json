@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 scripts/validate_openspec.py --quiet"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 scripts/validate_openspec.py --quiet && python3 scripts/check_openspec_drift.py --quiet"
+          }
+        ]
+      }
+    ]
+  }
+}

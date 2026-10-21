@@ -3,9 +3,9 @@
 ## Purpose
 Enables automated services and machine clients authenticated via Ory Hydra OAuth2 Client Credentials to exchange upstream bearer access tokens for standard internal STS JWTs signed by STS's active ES256 key, ensuring uniform cryptography, auditability, and zero-trust identity propagation across the internal ecosystem.
 
-For visual architecture modeling, see [Archify Candidate Specification](../../../../.archify/architecture-secure-token-service-20261008-154500/candidate.json) and capture [Visual Check Dark PNG](../../../../.archify/architecture-secure-token-service-20261008-154500/visual-check/secure-token-service.visual-check.2048x1320.dark.png).
+For visual architecture modeling, see [Archify Candidate Specification](../../../../../.archify/architecture-secure-token-service-20261008-154500/candidate.json) and capture [Visual Check Dark PNG](../../../../../.archify/architecture-secure-token-service-20261008-154500/visual-check/secure-token-service.visual-check.2048x1320.dark.png).
 
-![Secure Token Service Architecture (Dark Mode)](../../../../.archify/architecture-secure-token-service-20261008-154500/visual-check/secure-token-service.visual-check.2048x1320.dark.png)
+![Secure Token Service Architecture (Dark Mode)](../../../../../.archify/architecture-secure-token-service-20261008-154500/visual-check/secure-token-service.visual-check.2048x1320.dark.png)
 
 ## ADDED Requirements
 
