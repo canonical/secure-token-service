@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADRs)
 
-This directory contains Architecture Decision Records documenting key technical decisions made in the Secure Token Service (Janus) project.
+This directory contains Architecture Decision Records documenting key technical decisions made in the Secure Token Service project.
 
 ## Index
 

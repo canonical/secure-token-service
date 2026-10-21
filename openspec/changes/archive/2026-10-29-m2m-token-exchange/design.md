@@ -26,10 +26,10 @@ To support M2M callers using the OAuth2 Client Credentials grant via Ory Hydra, 
 ## System Architecture Model (Archify - Dark Theme)
 
 The machine client credentials architecture has been modeled, validated, and rendered via **Archify**:
-- **Candidate Specification**: [`candidate.json`](../../../.archify/architecture-secure-token-service-20261008-154500/candidate.json)
-- **Visual Verification Capture (Dark Theme)**: [`secure-token-service.visual-check.2048x1320.dark.png`](../../../.archify/architecture-secure-token-service-20261008-154500/visual-check/secure-token-service.visual-check.2048x1320.dark.png)
+- **Candidate Specification**: [`candidate.json`](../../../../.archify/architecture-secure-token-service-20261008-154500/candidate.json)
+- **Visual Verification Capture (Dark Theme)**: [`secure-token-service.visual-check.2048x1320.dark.png`](../../../../.archify/architecture-secure-token-service-20261008-154500/visual-check/secure-token-service.visual-check.2048x1320.dark.png)
 
-![Secure Token Service Architecture (Dark Mode)](../../../.archify/architecture-secure-token-service-20261008-154500/visual-check/secure-token-service.visual-check.2048x1320.dark.png)
+![Secure Token Service Architecture (Dark Mode)](../../../../.archify/architecture-secure-token-service-20261008-154500/visual-check/secure-token-service.visual-check.2048x1320.dark.png)
 
 ## Architecture & Sequence
 

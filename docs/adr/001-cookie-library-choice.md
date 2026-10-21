@@ -5,7 +5,7 @@
 **Deciders**: Development Team  
 **
 
-Context**: Janus handles security-critical session cookies containing user authentication state. The library chosen must provide authenticated encryption to prevent tampering and information leakage.
+Context**: STS handles security-critical session cookies containing user authentication state. The library chosen must provide authenticated encryption to prevent tampering and information leakage.
 
 ## Decision
 

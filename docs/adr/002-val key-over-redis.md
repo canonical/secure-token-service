@@ -6,7 +6,7 @@
 
 ## Context
 
-Janus requires a fast, in-memory key-value store for session storage and JWKS caching. Redis has been the traditional choice, but Valkey emerged as an open-source fork.
+STS requires a fast, in-memory key-value store for session storage and JWKS caching. Redis has been the traditional choice, but Valkey emerged as an open-source fork.
 
 ## Decision
 

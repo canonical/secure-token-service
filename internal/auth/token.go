@@ -83,7 +83,7 @@ func (km *KeyManager) generateAndSaveKey() error {
 	})
 
 	// Create JWK-style representation with both keys
-	kid := "janus-key-" + uuid.New().String()[:8]
+	kid := "sts-key-" + uuid.New().String()[:8]
 
 	// Store complete key data as JSONB
 	keyData := map[string]interface{}{

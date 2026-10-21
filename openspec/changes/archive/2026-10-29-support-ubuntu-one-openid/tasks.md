@@ -34,11 +34,11 @@
 - [x] 6.3 Run end-to-end integration verification with Docker Compose validating both OIDC and Ubuntu One flows.
 
 
-## Verification Suite
+## 7. Verification Suite
 
-- Unit test suite: `go test -v -race ./internal/...`
-- OpenSpec validation: `openspec validate support-ubuntu-one-openid --strict`
-- Linting and vulnerability check: `golangci-lint run ./...` and `govulncheck ./...`
+- [x] 7.1 Execute unit test suite with race detector: `go test -v -race ./internal/...`.
+- [x] 7.2 Validate OpenSpec change strictly: `openspec validate support-ubuntu-one-openid --strict`.
+- [x] 7.3 Run static analysis and vulnerability checks: `golangci-lint run ./...` and `govulncheck ./...`.
 
 ## Implementation Notes
 
