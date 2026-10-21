@@ -1,4 +1,4 @@
-# Makefile for Session Service (Janus)
+# Makefile for Session Service
 
 .PHONY: all build build-all test clean run install-deps proto
 

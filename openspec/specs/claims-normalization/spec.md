@@ -3,7 +3,7 @@
 ## Purpose
 Establishes a uniform claims extraction and fallback pipeline across upstream identity providers, allowing attributes from Ubuntu One OpenID assertions (such as email, nickname, and fullname) to be mapped and substituted in place of OIDC claims, stored in the session, and minted into downstream internal JWTs.
 
-For architectural diagrams and component details, see [Architecture Design: Claims Normalization and Mapping](../../design.md#claims-normalization-and-parity-strategy).
+For architectural diagrams and component details, see [Architecture Design: Claims Normalization and Mapping](../../changes/archive/2026-10-29-support-ubuntu-one-openid/design.md#claims-normalization-and-parity-strategy).
 
 ## Requirements
 

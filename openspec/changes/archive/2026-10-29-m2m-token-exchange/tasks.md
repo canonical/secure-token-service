@@ -35,4 +35,5 @@
 
 ## Implementation Notes
 
-*(Deviations from original plan or implementation discoveries will be recorded here during execution)*
+- `HydraTokenVerifier` (`internal/auth/hydra.go`) uses `lestrrat-go/jwx/v2/jwk.Cache` with a 10-minute default refresh interval, 1-minute minimum refresh interval, 5-second clock skew tolerance (`5 * time.Second`), and `< 60s` near-expiry rejection (`ErrTokenExpiringSoon`), exposing `Close() error` to cancel background refresh goroutines cleanly on shutdown.
+- `ExchangeToken` (`internal/grpc/server.go`) enforces a 64 KB (`65536` bytes) token size limit before parsing (`codes.InvalidArgument`), clamps minted ES256 token lifetime to `min(configured_expiry, remaining_upstream_validity)`, and maps machine identities to `sub: <client_id>` and `email: <client_id>@serviceaccount.local`.
