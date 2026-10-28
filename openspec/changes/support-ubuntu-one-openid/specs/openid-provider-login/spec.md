@@ -8,7 +8,7 @@ For architectural diagrams and component details, see [Architecture Design: Ubun
 ## ADDED Requirements
 
 ### Requirement: Provider selection at login
-The `/auth/login` endpoint SHALL accept an optional `provider` query parameter indicating which upstream identity provider to use for authentication. Supported values SHALL be `oidc` and `openid`. The provider query parameter matching SHALL be case-insensitive (`openid`, `OPENID`, `oidc`, `OIDC`). If omitted, the system SHALL default to `oidc` to maintain backward compatibility. If an unsupported provider is requested, the system SHALL respond with HTTP 400 Bad Request returning a JSON body containing `error` and `message` fields.
+The `/auth/login` endpoint SHALL accept an optional case-insensitive `provider` query parameter supporting `oidc` and `openid`, defaulting to `oidc` when omitted. If an unsupported provider value is requested, the system SHALL reject the request with HTTP 400 Bad Request and a JSON payload containing `error` and `message` fields.
 
 #### Scenario: Initiate login with default provider
 - **WHEN** a client sends `GET /auth/login` with no provider parameter
@@ -31,7 +31,7 @@ The `/auth/login` endpoint SHALL accept an optional `provider` query parameter i
 - **THEN** the system returns HTTP 400 Bad Request with a JSON body containing `error` and `message` fields explaining the unsupported provider
 
 ### Requirement: Dedicated Ubuntu One OpenID callback verification
-The `/auth/openid/callback` endpoint SHALL be dedicated exclusively to verifying OpenID 2.0 authentication responses from Ubuntu One. The endpoint SHALL NOT handle OIDC callbacks. Verification SHALL be performed directly against Ubuntu One via an HTTP POST containing `openid.mode=check_authentication`. If verification succeeds, a user session SHALL be established and the user SHALL be redirected to the validated `return_to` destination. If verification fails, cancellation is received, or parameters are invalid, the system SHALL respond with HTTP 400 Bad Request formatted as a JSON body containing `error` and `message` fields.
+The `/auth/openid/callback` endpoint SHALL exclusively verify Ubuntu One OpenID 2.0 assertions via direct HTTP POST (`openid.mode=check_authentication`) and SHALL NOT process OIDC callbacks. On valid verification, the system SHALL create a user session and redirect to the validated `return_to` URL; on cancellation, invalid parameters, or verification failure, it SHALL return HTTP 400 Bad Request with a JSON `error` and `message` body.
 
 #### Scenario: Successful Ubuntu One callback verification
 - **WHEN** the browser returns to `/auth/openid/callback` with valid OpenID 2.0 response parameters and a valid state cookie indicating `provider: "openid"`

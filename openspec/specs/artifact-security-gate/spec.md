@@ -1,7 +1,7 @@
 # artifact-security-gate Specification
 
 ## Purpose
-TBD - created by archiving change prerelease-secscan-gate. Update Purpose after archive.
+Enforces automated pre-release security gates across Secure Token Service CI and release workflows, requiring Go dependency vulnerability analysis (`govulncheck`) on pull requests and container image vulnerability scanning (`Trivy`) on candidate tags before promoting images to `stable` or graduating GitHub Releases.
 ## Requirements
 ### Requirement: Pull request vulnerability pre-check
 The test verification workflow SHALL execute static vulnerability analysis on Go dependencies prior to initiating container image builds. If any high or critical vulnerability with a reachable execution path is detected, the workflow SHALL terminate with an error and skip container image construction.

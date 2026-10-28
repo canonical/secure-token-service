@@ -80,14 +80,14 @@ flowchart TD
 
 | File / Component | Status | Responsibilities & Changes |
 |---|---|---|
-| [`internal/config/config.go`](internal/config/config.go) | Modified | Adds `UBUNTU_ONE_OPENID_URL` (default: `https://login.ubuntu.com/+openid`), `UBUNTU_ONE_REALM`, and `DEFAULT_AUTH_PROVIDER`. |
-| [`internal/cookie/cookie.go`](internal/cookie/cookie.go) | Modified | Encapsulates full session cookie generation (`SetSessionCookie`, `ClearSessionCookie`), updates state cookie to store provider metadata (`SetAuthState`, `GetAuthState`), standardizes `SameSite=Lax`, dynamic `Secure`, and `HttpOnly`. |
-| [`internal/http/interfaces.go`](internal/http/interfaces.go) | Modified | Expands `AuthCookieManager` to include session cookie setter/clearer and generic `AuthState` methods. Defines `OpenIDProvider` interface. |
+| [`internal/config/config.go`](../../../internal/config/config.go) | Modified | Adds `UBUNTU_ONE_OPENID_URL` (default: `https://login.ubuntu.com/+openid`), `UBUNTU_ONE_REALM`, and `DEFAULT_AUTH_PROVIDER`. |
+| [`internal/cookie/cookie.go`](../../../internal/cookie/cookie.go) | Modified | Encapsulates full session cookie generation (`SetSessionCookie`, `ClearSessionCookie`), updates state cookie to store provider metadata (`SetAuthState`, `GetAuthState`), standardizes `SameSite=Lax`, dynamic `Secure`, and `HttpOnly`. |
+| [`internal/http/interfaces.go`](../../../internal/http/interfaces.go) | Modified | Expands `AuthCookieManager` to include session cookie setter/clearer and generic `AuthState` methods. Defines `OpenIDProvider` interface. |
 | `internal/auth/openid/ubuntuone.go` | **New** | OpenID 2.0 relying party implementation: builds redirect URL with SREG 1.1 and AX 1.0 schemas (`email`, `nickname`, `fullname`), performs direct HTTP POST `check_authentication` verification, parses response. |
-| [`internal/session/store.go`](internal/session/store.go) | Modified | Extends `Session` struct with `Provider string` and `Claims map[string]any` to retain upstream claims in Valkey. |
-| [`internal/http/server.go`](internal/http/server.go) | Modified | `handleLogin`: reads `?provider=...`, generates state preserving provider choice, redirects to selected IdP.<br/>`handleCallback`: handles existing OIDC flow.<br/>`handleOpenIDCallback`: **new handler** dedicated to OpenID callback, verifies response with Ubuntu One, normalizes claims, sets standardized session cookie. |
-| [`internal/grpc/server.go`](internal/grpc/server.go) | Modified | `ExchangeSession`: ensures downstream JWT contract (`sub: email`, `email: email`) is maintained identically across both providers. |
-| [`docs/api/openapi.yaml`](docs/api/openapi.yaml) | Modified | Documents the `provider` query parameter on `/auth/login`, `/auth/openid/callback`, and updated cookie flags. |
+| [`internal/session/store.go`](../../../internal/session/store.go) | Modified | Extends `Session` struct with `Provider string` and `Claims map[string]any` to retain upstream claims in Valkey. |
+| [`internal/http/server.go`](../../../internal/http/server.go) | Modified | `handleLogin`: reads `?provider=...`, generates state preserving provider choice, redirects to selected IdP.<br/>`handleCallback`: handles existing OIDC flow.<br/>`handleOpenIDCallback`: **new handler** dedicated to OpenID callback, verifies response with Ubuntu One, normalizes claims, sets standardized session cookie. |
+| [`internal/grpc/server.go`](../../../internal/grpc/server.go) | Modified | `ExchangeSession`: ensures downstream JWT contract (`sub: email`, `email: email`) is maintained identically across both providers. |
+| [`docs/api/openapi.yaml`](../../../docs/api/openapi.yaml) | Modified | Documents the `provider` query parameter on `/auth/login`, `/auth/openid/callback`, and updated cookie flags. |
 
 ---
 
