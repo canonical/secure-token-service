@@ -74,7 +74,7 @@ func TestHandleHome_InvalidSessionCookie(t *testing.T) {
 
 	mockCookieManager := NewMockAuthCookieManager(ctrl)
 	mockCookieManager.EXPECT().
-		Decode("session_id", "invalid_cookie_value").
+		Decode("session_id", "invalid_cookie_value", gomock.Any()).
 		Return("", errors.New("decode error"))
 
 	server := NewServer(nil, nil, mockCookieManager, nil, nil)
@@ -108,7 +108,7 @@ func TestHandleHome_SessionNotFound(t *testing.T) {
 
 	sessionID := "test-session-id"
 	mockCookieManager.EXPECT().
-		Decode("session_id", "valid_cookie").
+		Decode("session_id", "valid_cookie", gomock.Any()).
 		Return(sessionID, nil)
 
 	mockSessionStore.EXPECT().
@@ -146,7 +146,7 @@ func TestHandleHome_SessionReturnsNil(t *testing.T) {
 
 	sessionID := "test-session-id"
 	mockCookieManager.EXPECT().
-		Decode("session_id", "valid_cookie").
+		Decode("session_id", "valid_cookie", gomock.Any()).
 		Return(sessionID, nil)
 
 	mockSessionStore.EXPECT().
@@ -194,7 +194,7 @@ func TestHandleHome_Authenticated(t *testing.T) {
 	}
 
 	mockCookieManager.EXPECT().
-		Decode("session_id", "valid_cookie").
+		Decode("session_id", "valid_cookie", gomock.Any()).
 		Return(sessionID, nil)
 
 	mockSessionStore.EXPECT().
@@ -251,7 +251,7 @@ func TestHandleHome_TokenMasking(t *testing.T) {
 	}
 
 	mockCookieManager.EXPECT().
-		Decode("session_id", "valid_cookie").
+		Decode("session_id", "valid_cookie", gomock.Any()).
 		Return(sessionID, nil)
 
 	mockSessionStore.EXPECT().
@@ -304,7 +304,7 @@ func TestHandleHome_NoRefreshToken(t *testing.T) {
 	}
 
 	mockCookieManager.EXPECT().
-		Decode("session_id", "valid_cookie").
+		Decode("session_id", "valid_cookie", gomock.Any()).
 		Return(sessionID, nil)
 
 	mockSessionStore.EXPECT().
@@ -346,7 +346,7 @@ func TestHandleHome_ExpiredSession(t *testing.T) {
 	}
 
 	mockCookieManager.EXPECT().
-		Decode("session_id", "valid_cookie").
+		Decode("session_id", "valid_cookie", gomock.Any()).
 		Return(sessionID, nil)
 
 	mockSessionStore.EXPECT().
@@ -391,7 +391,7 @@ func TestHandleHome_ActiveSession(t *testing.T) {
 	}
 
 	mockCookieManager.EXPECT().
-		Decode("session_id", "valid_cookie").
+		Decode("session_id", "valid_cookie", gomock.Any()).
 		Return(sessionID, nil)
 
 	mockSessionStore.EXPECT().
@@ -648,7 +648,7 @@ func TestHandleHome_ContextPropagation(t *testing.T) {
 
 	sessionID := "test-session-id"
 	mockCookieManager.EXPECT().
-		Decode("session_id", "valid_cookie").
+		Decode("session_id", "valid_cookie", gomock.Any()).
 		Return(sessionID, nil)
 
 	// Use gomock.Any() to match the context, but ensure Get is called

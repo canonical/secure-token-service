@@ -16,6 +16,9 @@ import (
 	"github.com/chmike/securecookie"
 )
 
+// testMaxAge is a session cookie lifetime in seconds long enough not to expire during tests.
+const testMaxAge = 86400
+
 func TestNewCookieManager_KeyValidation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -65,7 +68,7 @@ func TestNewCookieManager_KeyValidation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Encode failed: %v", err)
 			}
-			decoded, err := cm.Decode("test", encoded)
+			decoded, err := cm.Decode("test", encoded, testMaxAge)
 			if err != nil {
 				t.Fatalf("Decode failed: %v", err)
 			}
@@ -103,7 +106,7 @@ func TestCookieManager_EncodeDecode(t *testing.T) {
 				t.Error("Encoded cookie is empty")
 			}
 
-			decoded, err := cm.Decode(tc.cookieName, encoded)
+			decoded, err := cm.Decode(tc.cookieName, encoded, testMaxAge)
 			if err != nil {
 				t.Fatalf("Decode failed: %v", err)
 			}
@@ -132,7 +135,7 @@ func TestCookieManager_DecodeInvalid(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := cm.Decode(tc.cookieName, tc.value)
+			_, err := cm.Decode(tc.cookieName, tc.value, testMaxAge)
 			if err == nil {
 				t.Error("Expected error when decoding invalid cookie, got nil")
 			}
@@ -158,9 +161,33 @@ func TestCookieManager_WrongKey(t *testing.T) {
 		t.Fatalf("Encode failed: %v", err)
 	}
 
-	_, err = cm2.Decode("session_id", encoded)
+	_, err = cm2.Decode("session_id", encoded, testMaxAge)
 	if err == nil {
 		t.Error("Expected error when decoding with different keys, got nil")
+	}
+}
+
+func TestCookieManager_DecodeMaxAge(t *testing.T) {
+	cm, err := cookie.NewCookieManager(securecookie.MustGenerateRandomKey())
+	if err != nil {
+		t.Fatalf("NewCookieManager failed: %v", err)
+	}
+
+	encoded, err := cm.Encode("session_id", "session-123")
+	if err != nil {
+		t.Fatalf("Encode failed: %v", err)
+	}
+
+	time.Sleep(2100 * time.Millisecond)
+
+	if _, err := cm.Decode("session_id", encoded, 1); err == nil {
+		t.Error("Expected error decoding a cookie older than maxAge")
+	}
+	if decoded, err := cm.Decode("session_id", encoded, testMaxAge); err != nil || decoded != "session-123" {
+		t.Errorf("Decode with long maxAge = %q, %v; want session-123, nil", decoded, err)
+	}
+	if decoded, err := cm.Decode("session_id", encoded, 0); err != nil || decoded != "session-123" {
+		t.Errorf("Decode with no maxAge = %q, %v; want session-123, nil", decoded, err)
 	}
 }
 
@@ -428,7 +455,7 @@ func TestCookieManager_SetSessionCookie(t *testing.T) {
 	}
 
 	// Verify the session ID decodes properly
-	decoded, err := cm.Decode("session_id", c.Value)
+	decoded, err := cm.Decode("session_id", c.Value, testMaxAge)
 	if err != nil {
 		t.Fatalf("failed to decode session cookie: %v", err)
 	}

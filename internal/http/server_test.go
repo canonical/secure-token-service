@@ -732,6 +732,64 @@ func setupCallbackSuccessMocks(
 	return server, req, w
 }
 
+// TestHandleCallback_CookieExpiryUsesSessionLifetime checks the cookie outlives a short-lived upstream token.
+func TestHandleCallback_CookieExpiryUsesSessionLifetime(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	cookieManager := NewMockAuthCookieManager(ctrl)
+	oidcProvider := NewMockOIDCProvider(ctrl)
+	store := NewMockStore(ctrl)
+	oauth2Token := NewMockOAuth2Token(ctrl)
+	idToken := NewMockIDToken(ctrl)
+
+	sessionExpiry := 24 * time.Hour
+	server := NewServer(store, nil, cookieManager, oidcProvider, nil, WithSessionExpiry(sessionExpiry))
+
+	cookieManager.EXPECT().GetAuthState(gomock.Any()).Return(&cookie.AuthState{State: "mock-state-123", Provider: "oidc"}, nil)
+	cookieManager.EXPECT().ClearAuthState(gomock.Any(), gomock.Any())
+	oidcProvider.EXPECT().Exchange(gomock.Any(), "mock-code").Return(oauth2Token, nil)
+	oauth2Token.EXPECT().Extra("id_token").Return("mock-raw-id-token")
+	oidcProvider.EXPECT().VerifyIDToken(gomock.Any(), "mock-raw-id-token").Return(idToken, nil)
+	cookieManager.EXPECT().GetOIDCNonce(gomock.Any()).Return("mock-nonce-123", nil)
+	cookieManager.EXPECT().ClearOIDCNonce(gomock.Any(), gomock.Any())
+	idToken.EXPECT().GetNonce().Return("mock-nonce-123", nil)
+	idToken.EXPECT().Claims(gomock.Any()).DoAndReturn(func(v interface{}) error {
+		claimsPtr, ok := v.(*struct {
+			Email string `json:"email,omitempty"`
+		})
+		if ok {
+			claimsPtr.Email = "user@example.com"
+		}
+		return nil
+	})
+	oauth2Token.EXPECT().AccessToken().Return("mock-access-token")
+	idToken.EXPECT().GetOriginalToken().Return("mock-id-token")
+	oauth2Token.EXPECT().RefreshToken().Return("mock-refresh-token")
+	oauth2Token.EXPECT().Expiry().Return(time.Now().Add(5 * time.Minute))
+	store.EXPECT().Set(gomock.Any(), gomock.Any()).Return(nil)
+
+	var cookieExpiry time.Time
+	cookieManager.EXPECT().
+		SetSessionCookie(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ http.ResponseWriter, _ *http.Request, _ string, expiresAt time.Time) error {
+			cookieExpiry = expiresAt
+			return nil
+		})
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=mock-state-123&code=mock-code", nil)
+	w := httptest.NewRecorder()
+
+	server.Router().ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("Expected status 302, got %d", w.Code)
+	}
+	if remaining := time.Until(cookieExpiry); remaining < sessionExpiry-time.Minute || remaining > sessionExpiry {
+		t.Errorf("Cookie expiry in %v, want about %v", remaining, sessionExpiry)
+	}
+}
+
 // TestHandleCallback tests the callback handler
 func TestHandleCallback(t *testing.T) {
 	t.Run("Valid return_to in state -> 302 redirect to return_to", func(t *testing.T) {
@@ -1300,7 +1358,7 @@ func TestHandleLogout(t *testing.T) {
 	// Setup mock - Decode will fail (no valid cookie), which is OK
 	// The handler will still clear the cookie even if decode fails
 	cookieManager.EXPECT().
-		Decode("session_id", "test-session-value").
+		Decode("session_id", "test-session-value", gomock.Any()).
 		Return("test-session-id", nil).
 		AnyTimes() // May or may not be called depending on cookie presence
 

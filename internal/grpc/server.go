@@ -14,6 +14,7 @@ import (
 
 	stsv1 "github.com/canonical/secure-token-service/api/proto/v1"
 	"github.com/canonical/secure-token-service/internal/auth"
+	"github.com/canonical/secure-token-service/internal/constants"
 	"github.com/canonical/secure-token-service/internal/observability"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -35,6 +36,15 @@ func WithTokenVerifier(verifier TokenVerifier) ServerOption {
 	}
 }
 
+// WithSessionExpiry sets the session cookie lifetime; non-positive values keep the default.
+func WithSessionExpiry(expiry time.Duration) ServerOption {
+	return func(s *Server) {
+		if expiry > 0 {
+			s.sessionMaxAge = int(expiry.Seconds())
+		}
+	}
+}
+
 // Server implements the SecurityTokenService gRPC interface.
 type Server struct {
 	stsv1.UnimplementedSecurityTokenServiceServer
@@ -45,6 +55,7 @@ type Server struct {
 	jwtIssuer     string
 	jwtAudience   string
 	jwtExpiry     int
+	sessionMaxAge int
 	observability *observability.Observability
 	server        *grpc.Server
 }
@@ -68,6 +79,7 @@ func NewServer(store SessionStore, km KeyManager, cm CookieManager, issuer, audi
 		jwtIssuer:     issuer,
 		jwtAudience:   audience,
 		jwtExpiry:     expiry,
+		sessionMaxAge: int(constants.DefaultSessionExpiry.Seconds()),
 		observability: obs,
 	}
 	for _, opt := range opts {
@@ -83,7 +95,7 @@ func (s *Server) ExchangeSession(ctx context.Context, req *stsv1.ExchangeRequest
 	}
 
 	// Decode session cookie
-	sessionID, err := s.cookieManager.Decode("session_id", req.SessionCookie)
+	sessionID, err := s.cookieManager.Decode("session_id", req.SessionCookie, s.sessionMaxAge)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid session cookie")
 	}

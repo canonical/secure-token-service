@@ -50,7 +50,7 @@ type AuthCookieManager interface {
 	ClearSessionCookie(w http.ResponseWriter, r *http.Request)
 	// Additional methods for session cookies
 	Encode(name, value string) (string, error)
-	Decode(name, value string) (string, error)
+	Decode(name, value string, maxAge int) (string, error)
 }
 
 // IDToken defines the interface for ID token operations

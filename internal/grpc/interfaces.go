@@ -15,7 +15,7 @@ import (
 
 // CookieManager defines the interface for secure cookie operations
 type CookieManager interface {
-	Decode(name, value string) (string, error)
+	Decode(name, value string, maxAge int) (string, error)
 }
 
 // SessionStore defines the interface for session storage operations

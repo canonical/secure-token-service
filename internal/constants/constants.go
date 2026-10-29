@@ -8,7 +8,7 @@ import "time"
 
 // Cookie configuration constants
 const (
-	// CookieMaxAge is the maximum age for session and OIDC state cookies (10 minutes)
+	// CookieMaxAge is the maximum age for OIDC state and nonce cookies (10 minutes)
 	CookieMaxAge = 600 // seconds
 
 	// CookieName is the name of the session cookie
@@ -25,6 +25,9 @@ const (
 const (
 	// DefaultSessionTTL is the default time-to-live for sessions (1 hour)
 	DefaultSessionTTL = 1 * time.Hour
+
+	// DefaultSessionExpiry is the session and session cookie lifetime used when none is configured (24 hours)
+	DefaultSessionExpiry = 24 * time.Hour
 
 	// DefaultJWTExpiry is the default expiry for minted JWTs  (15 minutes)
 	DefaultJWTExpiry = 15 * time.Minute

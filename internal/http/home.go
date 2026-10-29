@@ -26,7 +26,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Decode session from cookie
-	sessionID, err := s.cookieManager.Decode("session_id", cookie.Value)
+	sessionID, err := s.cookieManager.Decode("session_id", cookie.Value, s.sessionMaxAge())
 	if err != nil {
 		s.logger(r.Context()).Error("failed to decode session cookie", zap.Error(err))
 		renderUnauthenticatedHome(w)

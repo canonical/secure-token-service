@@ -83,6 +83,19 @@ type Server struct {
 
 const defaultAuthProvider = "oidc"
 
+// sessionLifetime returns the configured session lifetime, or the default when unset.
+func (s *Server) sessionLifetime() time.Duration {
+	if s.sessionExpiry <= 0 {
+		return constants.DefaultSessionExpiry
+	}
+	return s.sessionExpiry
+}
+
+// sessionMaxAge returns the session lifetime in seconds used to validate session cookies.
+func (s *Server) sessionMaxAge() int {
+	return int(s.sessionLifetime().Seconds())
+}
+
 var fallbackLogger = zap.NewNop()
 
 // logger returns the zap logger from observability, or creates a new one if not available
@@ -482,7 +495,8 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 6. Set Session Cookie
-	if err := s.cookieManager.SetSessionCookie(w, r, sessionID, sess.ExpiresAt); err != nil {
+	// The cookie outlives the upstream access token; the session store enforces expiry.
+	if err := s.cookieManager.SetSessionCookie(w, r, sessionID, now.Add(s.sessionLifetime())); err != nil {
 		s.logger(r.Context()).Error("failed to set session cookie", zap.Error(err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -592,11 +606,7 @@ func (s *Server) handleOpenIDCallback(w http.ResponseWriter, r *http.Request) {
 	// 4. Create session
 	sessionID := uuid.New().String()
 	now := time.Now()
-	expiryDuration := s.sessionExpiry
-	if expiryDuration <= 0 {
-		expiryDuration = 24 * time.Hour
-	}
-	expiresAt := now.Add(expiryDuration)
+	expiresAt := now.Add(s.sessionLifetime())
 
 	sess := &session.Session{
 		SessionID: sessionID,
@@ -637,7 +647,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session_id")
 	if err == nil {
 		// Attempt to decode to get session ID for deletion from store
-		if sessionID, err := s.cookieManager.Decode("session_id", cookie.Value); err == nil {
+		if sessionID, err := s.cookieManager.Decode("session_id", cookie.Value, s.sessionMaxAge()); err == nil {
 			if err := s.sessionStore.Delete(r.Context(), sessionID); err != nil {
 				s.logger(r.Context()).Error("failed to delete session",
 					zap.String("session_id", sessionID),

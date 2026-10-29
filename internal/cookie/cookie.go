@@ -39,7 +39,6 @@ type AuthState struct {
 // CookieManager handles secure cookie encoding and decoding.
 type CookieManager struct {
 	key          []byte
-	sessionCk    *securecookie.Obj // Main session cookie
 	oauthStateCk *securecookie.Obj
 	oauthNonceCk *securecookie.Obj
 }
@@ -55,18 +54,6 @@ func NewCookieManager(hashKey []byte) (*CookieManager, error) {
 	key := hashKey
 	if len(key) > 32 {
 		key = key[:32]
-	}
-
-	// Create cookie objects for each cookie type
-	sessionCk, err := securecookie.New("session_id", key, securecookie.Params{
-		Path:     "/",
-		MaxAge:   constants.CookieMaxAge,
-		HTTPOnly: true,
-		Secure:   false, // Will be set dynamically based on request
-		SameSite: securecookie.Lax,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create session cookie: %w", err)
 	}
 
 	oauthStateCk, err := securecookie.New("oauth_state", key, securecookie.Params{
@@ -93,7 +80,6 @@ func NewCookieManager(hashKey []byte) (*CookieManager, error) {
 
 	return &CookieManager{
 		key:          key,
-		sessionCk:    sessionCk,
 		oauthStateCk: oauthStateCk,
 		oauthNonceCk: oauthNonceCk,
 	}, nil
@@ -101,11 +87,9 @@ func NewCookieManager(hashKey []byte) (*CookieManager, error) {
 
 // Encode encodes a cookie name and value using securecookie.
 func (m *CookieManager) Encode(name string, value string) (string, error) {
-	// Create a temporary securecookie object for this specific name
-	// We use the same params as the main session cookie
+	// MaxAge is not set: the encoded value only carries the issue timestamp, and expiry is enforced in Decode.
 	obj, err := securecookie.New(name, m.key, securecookie.Params{
 		Path:     "/",
-		MaxAge:   constants.CookieMaxAge,
 		HTTPOnly: true,
 		Secure:   false,
 		SameSite: securecookie.Lax,
@@ -129,11 +113,11 @@ func (m *CookieManager) Encode(name string, value string) (string, error) {
 }
 
 // Decode decodes a cookie name and value using securecookie.
-func (m *CookieManager) Decode(name, value string) (string, error) {
-	// Create a temporary securecookie object for this specific name
+// maxAge is the cookie lifetime in seconds, counted from when it was issued; 0 disables the age check.
+func (m *CookieManager) Decode(name, value string, maxAge int) (string, error) {
 	obj, err := securecookie.New(name, m.key, securecookie.Params{
 		Path:     "/",
-		MaxAge:   constants.CookieMaxAge,
+		MaxAge:   maxAge,
 		HTTPOnly: true,
 		Secure:   false,
 		SameSite: securecookie.Lax,

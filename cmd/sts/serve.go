@@ -178,7 +178,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Initialize Upstream Hydra Token Verifier for M2M exchange
-	var grpcOpts []grpcserver.ServerOption
+	grpcOpts := []grpcserver.ServerOption{
+		grpcserver.WithSessionExpiry(time.Duration(cfg.SessionExpiry) * time.Second),
+	}
 	hydraJWKSURL := cfg.HydraJWKSEndpoint()
 	hydraVerifier, err := auth.NewHydraTokenVerifier(
 		ctx,
