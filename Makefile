@@ -129,7 +129,8 @@ harness2-validate:
 .PHONY: harness2-validate
 
 harness2-audit:
-	PYTHONPATH=.harness2 python3 -m openspec_harness.cli audit
+	python3 scripts/validate_openspec.py --workspace . --repo-root .
+	python3 scripts/check_openspec_drift.py --repo-root . --config openspec/drift-checks.yaml
 .PHONY: harness2-audit
 
 harness2-sweep:

@@ -1,8 +1,16 @@
-#!/usr/bin/env python3
-"""Deterministic OpenSpec structural, strict-CLI, and link validator for STS.
+"""Config-driven OpenSpec structural, strict-CLI, and link validator.
 
-Used as a harness2 c7 verification script (`python3 scripts/validate_openspec.py`)
-by OpenCode and Antigravity harnesses as well as local developer / CI checks.
+The generic engine reads its structural thresholds from the optional
+`validation:` block of the repository's `openspec/config.yaml`, so a
+repository adopts it by declaring (or inheriting) settings rather than by
+patching the validator:
+
+    validation:
+      max_requirement_chars: 500
+      require_mermaid_in_design: true
+      proposal_sections: [Why, What Changes, Non-goals, ...]
+      design_sections: [Context, Goals, Risks]
+      tasks_checkbox_sections: [Verification Suite, Documentation & Rollout]
 """
 
 from __future__ import annotations
@@ -16,6 +24,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 HEADING_RE = re.compile(r"^(#{2,4})\s+(.+?)\s*$", re.M)
 REQ_BLOCK_RE = re.compile(
     r"^###\s+Requirement:\s*(.+?)\n(.*?)(?=^###\s+Requirement:|^####\s+Scenario:|^##\s+|\Z)",
@@ -25,6 +35,14 @@ SCENARIO_RE = re.compile(r"^####\s+Scenario:\s*(.+?)\s*$", re.M)
 MD_LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 CODE_FENCE_RE = re.compile(r"```.*?```", re.S)
 INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "max_requirement_chars": 500,
+    "require_mermaid_in_design": True,
+    "proposal_sections": ("Why", "What Changes", "Non-goals", "Success Metrics", "Capabilities", "Impact"),
+    "design_sections": ("Context", "Goals", "Risks"),
+    "tasks_checkbox_sections": ("Verification Suite", "Documentation & Rollout"),
+}
 
 PLACEHOLDER_PURPOSE_PATTERNS = (
     "tbd - created by archiving change",
@@ -38,6 +56,26 @@ PLACEHOLDER_NOTES_PATTERNS = (
 )
 
 
+def load_validation_settings(workspace_root: Path) -> dict[str, Any]:
+    """Merge `validation:` from `<workspace>/openspec/config.yaml` over the strict defaults."""
+    cfg: dict[str, Any] = {k: (list(v) if isinstance(v, tuple) else v) for k, v in DEFAULT_SETTINGS.items()}
+    config_path = Path(workspace_root) / "openspec" / "config.yaml"
+    if not config_path.is_file():
+        return cfg
+    try:
+        with config_path.open("r", encoding="utf-8") as fh:
+            data = yaml.safe_load(fh) or {}
+    except yaml.YAMLError:
+        return cfg
+    overrides = data.get("validation")
+    if not isinstance(overrides, dict):
+        return cfg
+    for key in DEFAULT_SETTINGS:
+        if key in overrides:
+            cfg[key] = overrides[key]
+    return cfg
+
+
 def _strip_code(md: str) -> str:
     """Remove fenced and inline code before scanning Markdown links."""
     no_fences = CODE_FENCE_RE.sub("", md)
@@ -48,6 +86,16 @@ def _extract_section(md: str, heading_prefix: str) -> str:
     """Return body text under the first `## <heading_prefix>` section."""
     pattern = re.compile(
         rf"^##\s+{re.escape(heading_prefix)}[^\n]*\n(.*?)(?=^##\s+|\Z)",
+        re.M | re.S | re.I,
+    )
+    m = pattern.search(md)
+    return m.group(1).strip() if m else ""
+
+
+def _extract_numbered_section(md: str, name: str) -> str:
+    """Return body text under `## <name>` or `## N. <name>` for any N."""
+    pattern = re.compile(
+        rf"^##\s+(?:\d+\.\s+)?{re.escape(name)}\s*\n(.*?)(?=^##\s+|\Z)",
         re.M | re.S | re.I,
     )
     m = pattern.search(md)
@@ -77,7 +125,9 @@ def check_relative_links(md_path: Path, repo_root: Path) -> list[str]:
     return issues
 
 
-def check_spec_file(spec_path: Path, repo_root: Path, *, is_delta: bool) -> list[dict[str, Any]]:
+def check_spec_file(
+    spec_path: Path, repo_root: Path, *, is_delta: bool, settings: dict[str, Any]
+) -> list[dict[str, Any]]:
     """Run granular checks on a main or delta `spec.md` file."""
     checks: list[dict[str, Any]] = []
     text = spec_path.read_text(encoding="utf-8", errors="replace")
@@ -131,14 +181,15 @@ def check_spec_file(spec_path: Path, repo_root: Path, *, is_delta: bool) -> list
             }
         )
 
+    max_chars = int(settings["max_requirement_chars"])
     req_matches = list(REQ_BLOCK_RE.finditer(text))
     long_reqs: list[str] = []
     non_normative: list[str] = []
     for m in req_matches:
         req_name = m.group(1).strip()
         req_body = m.group(2).strip()
-        if len(req_body) > 500:
-            long_reqs.append(f"{req_name} ({len(req_body)} chars > 500)")
+        if len(req_body) > max_chars:
+            long_reqs.append(f"{req_name} ({len(req_body)} chars > {max_chars})")
         if not re.search(r"\b(SHALL|MUST)\b", req_body):
             non_normative.append(req_name)
 
@@ -147,9 +198,9 @@ def check_spec_file(spec_path: Path, repo_root: Path, *, is_delta: bool) -> list
             "id": f"{rel}:requirement_length_strict",
             "ok": bool(req_matches) and not long_reqs,
             "detail": (
-                f"All {len(req_matches)} requirements <= 500 chars"
+                f"All {len(req_matches)} requirements <= {max_chars} chars"
                 if req_matches and not long_reqs
-                else f"{rel}: requirements exceeding 500 chars: {', '.join(long_reqs) or 'no requirements found'}"
+                else f"{rel}: requirements exceeding {max_chars} chars: {', '.join(long_reqs) or 'no requirements found'}"
             ),
         }
     )
@@ -190,7 +241,9 @@ def check_spec_file(spec_path: Path, repo_root: Path, *, is_delta: bool) -> list
     return checks
 
 
-def check_change_dir(change_dir: Path, repo_root: Path) -> list[dict[str, Any]]:
+def check_change_dir(
+    change_dir: Path, repo_root: Path, *, settings: dict[str, Any]
+) -> list[dict[str, Any]]:
     """Validate an active OpenSpec change directory against `openspec/config.yaml` contracts."""
     checks: list[dict[str, Any]] = []
     cid = change_dir.name
@@ -201,7 +254,7 @@ def check_change_dir(change_dir: Path, repo_root: Path) -> list[dict[str, Any]]:
         checks.append({"id": f"{cid}:proposal_exists", "ok": False, "detail": "Missing proposal.md"})
     else:
         ptext = proposal.read_text(encoding="utf-8", errors="replace")
-        required_sections = ("Why", "What Changes", "Non-goals", "Success Metrics", "Capabilities", "Impact")
+        required_sections = tuple(str(s) for s in settings["proposal_sections"])
         missing = [
             s for s in required_sections if not re.search(rf"^##\s+{re.escape(s)}\b", ptext, re.M | re.I)
         ]
@@ -210,7 +263,7 @@ def check_change_dir(change_dir: Path, repo_root: Path) -> list[dict[str, Any]]:
                 "id": f"{cid}:proposal_sections",
                 "ok": not missing,
                 "detail": (
-                    "proposal.md contains all required sections (Why, What Changes, Non-goals, Success Metrics, Capabilities, Impact)"
+                    f"proposal.md contains all required sections ({', '.join(required_sections)})"
                     if not missing
                     else f"{cid}/proposal.md: missing sections: {', '.join(missing)}"
                 ),
@@ -231,18 +284,24 @@ def check_change_dir(change_dir: Path, repo_root: Path) -> list[dict[str, Any]]:
         checks.append({"id": f"{cid}:design_exists", "ok": False, "detail": "Missing design.md"})
     else:
         dtext = design.read_text(encoding="utf-8", errors="replace")
-        has_context = bool(re.search(r"^##\s+Context\b", dtext, re.M | re.I))
-        has_goals = bool(re.search(r"^##\s+Goals\b", dtext, re.M | re.I))
-        has_mermaid = "```mermaid" in dtext
-        has_risks = bool(re.search(r"^##\s+Risks\b", dtext, re.M | re.I))
+        missing_design = [
+            s
+            for s in tuple(str(x) for x in settings["design_sections"])
+            if not re.search(rf"^##\s+(?:\d+\.\s+)?{re.escape(s)}\b", dtext, re.M | re.I)
+        ]
+        if settings["require_mermaid_in_design"] and "```mermaid" not in dtext:
+            missing_design.append("Mermaid diagram")
         checks.append(
             {
                 "id": f"{cid}:design_structure",
-                "ok": has_context and has_goals and has_mermaid and has_risks,
+                "ok": not missing_design,
                 "detail": (
-                    "design.md has Context, Goals/Non-Goals, Mermaid diagram, and Risks/Trade-offs"
-                    if (has_context and has_goals and has_mermaid and has_risks)
-                    else f"{cid}/design.md: missing Context={has_context}, Goals={has_goals}, Mermaid={has_mermaid}, Risks={has_risks}"
+                    (
+                        f"design.md has {', '.join(str(s) for s in settings['design_sections'])}"
+                        + (", and a Mermaid diagram" if settings["require_mermaid_in_design"] else "")
+                    )
+                    if not missing_design
+                    else f"{cid}/design.md: missing {', '.join(missing_design)}"
                 ),
             }
         )
@@ -261,24 +320,20 @@ def check_change_dir(change_dir: Path, repo_root: Path) -> list[dict[str, Any]]:
         checks.append({"id": f"{cid}:tasks_exists", "ok": False, "detail": "Missing tasks.md"})
     else:
         ttext = tasks.read_text(encoding="utf-8", errors="replace")
-        ver_body = _extract_section(ttext, "Verification Suite") or _extract_section(
-            ttext, "4. Verification Suite"
-        ) or _extract_section(ttext, "5. Verification Suite") or _extract_section(
-            ttext, "7. Verification Suite"
-        )
-        roll_body = _extract_section(ttext, "Documentation & Rollout") or _extract_section(
-            ttext, "5. Documentation & Rollout"
-        ) or _extract_section(ttext, "6. Documentation & Rollout")
-        ver_has_checkbox = bool(re.search(r"^-\s+\[[ xX]\]\s+\d+\.\d+\b", ver_body, re.M))
-        roll_has_checkbox = bool(re.search(r"^-\s+\[[ xX]\]\s+\d+\.\d+\b", roll_body, re.M))
+        missing_checkboxes: list[str] = []
+        for section in tuple(str(s) for s in settings["tasks_checkbox_sections"]):
+            body = _extract_numbered_section(ttext, section)
+            has_checkbox = bool(re.search(r"^-\s+\[[ xX]\]\s+\d+\.\d+\b", body, re.M))
+            if not has_checkbox:
+                missing_checkboxes.append(section)
         checks.append(
             {
                 "id": f"{cid}:tasks_verification_and_rollout",
-                "ok": ver_has_checkbox and roll_has_checkbox,
+                "ok": not missing_checkboxes,
                 "detail": (
-                    "tasks.md has numbered checkbox items in both Verification Suite and Documentation & Rollout"
-                    if (ver_has_checkbox and roll_has_checkbox)
-                    else f"{cid}/tasks.md: Verification Suite checkbox={ver_has_checkbox}, Documentation & Rollout checkbox={roll_has_checkbox}"
+                    f"tasks.md has numbered checkbox items in {', '.join(str(s) for s in settings['tasks_checkbox_sections'])}"
+                    if not missing_checkboxes
+                    else f"{cid}/tasks.md: numbered checkboxes missing in: {', '.join(missing_checkboxes)}"
                 ),
             }
         )
@@ -311,7 +366,7 @@ def check_change_dir(change_dir: Path, repo_root: Path) -> list[dict[str, Any]]:
         checks.append({"id": f"{cid}:delta_specs", "ok": False, "detail": "No specs/*/spec.md found"})
     else:
         for sp in delta_specs:
-            checks.extend(check_spec_file(sp, repo_root, is_delta=True))
+            checks.extend(check_spec_file(sp, repo_root, is_delta=True, settings=settings))
 
     return checks
 
@@ -371,8 +426,9 @@ def validate_workspace(
     include_cli: bool = True,
 ) -> dict[str, Any]:
     """Validate OpenSpec artifacts in `workspace_root` and return a structured report."""
-    workspace_root = workspace_root.resolve()
+    workspace_root = Path(workspace_root).resolve()
     effective_repo = (repo_root or workspace_root).resolve()
+    settings = load_validation_settings(workspace_root)
     openspec_dir = workspace_root / "openspec"
     checks: list[dict[str, Any]] = []
 
@@ -385,11 +441,17 @@ def validate_workspace(
             cap_id = sp.parent.name
             if target_id and target_id != cap_id:
                 continue
-            checks.extend(check_spec_file(sp, effective_repo, is_delta=False))
+            checks.extend(
+                check_spec_file(sp, effective_repo, is_delta=False, settings=settings)
+            )
             if target_id == cap_id:
                 for delta_sp in sorted((openspec_dir / "changes").glob(f"*/specs/{cap_id}/spec.md")):
                     if "archive" not in delta_sp.parts:
-                        checks.extend(check_spec_file(delta_sp, effective_repo, is_delta=True))
+                        checks.extend(
+                            check_spec_file(
+                                delta_sp, effective_repo, is_delta=True, settings=settings
+                            )
+                        )
 
     changes_dir = openspec_dir / "changes"
     if changes_dir.is_dir():
@@ -398,7 +460,7 @@ def validate_workspace(
                 continue
             if target_id and target_id != cdir.name:
                 continue
-            checks.extend(check_change_dir(cdir, effective_repo))
+            checks.extend(check_change_dir(cdir, effective_repo, settings=settings))
 
     total = len(checks)
     ok_count = sum(1 for c in checks if c["ok"])
@@ -419,7 +481,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate OpenSpec specs and changes strictly.")
     parser.add_argument("--workspace", default=".", help="Workspace directory containing openspec/")
     parser.add_argument("--repo-root", default=None, help="Repository root for resolving relative links")
-    parser.add_argument("--target", default=None, help="Optional single spec or change id to validate")
+    parser.add_argument("--target", default=None, help="Optional single spec or change id")
     parser.add_argument("--no-cli", action="store_true", help="Skip shelling out to openspec CLI")
     parser.add_argument("--json", action="store_true", help="Print JSON report")
     parser.add_argument("--quiet", action="store_true", help="Only print when findings exist")
@@ -443,4 +505,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

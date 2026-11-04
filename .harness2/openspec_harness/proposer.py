@@ -136,8 +136,6 @@ class OpenSpecScriptedProposer(Proposer):
                     "sub_agents/openspec_spec_auditor/AGENT.md",
                     f"{plugin_dir}/openspec_guard.ts",
                     "commands/openspec-check.md",
-                    "scripts/validate_openspec.py",
-                    "scripts/check_openspec_drift.py",
                 ]
                 for rel in rels:
                     self._copy_rel(full_dir, workspace, rel)
@@ -161,8 +159,6 @@ class OpenSpecScriptedProposer(Proposer):
                     f"{skill_dir}/openspec-detect-drift/SKILL.md",
                     "sub_agents/sts_security_reviewer/AGENT.md",
                     "commands/openspec-drift.md",
-                    "scripts/check_openspec_drift.py",
-                    "scripts/validate_openspec.py",
                 ]
                 for rel in rels:
                     self._copy_rel(full_dir, workspace, rel)
