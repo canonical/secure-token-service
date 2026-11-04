@@ -1,4 +1,10 @@
-"""BenchmarkAdapter connecting Google's harness2 to the local OpenSpec workflow in STS."""
+"""BenchmarkAdapter connecting Google's harness2 to the local OpenSpec workflow in STS.
+
+Repository-specific values (`domain`, `repo_symlinks`, `tasks`) are manifest-
+driven: they are read from `openspec/harness.yaml` instead of being hardcoded
+here, so other `canonical/` repositories can adopt the adapter by shipping
+their own manifest.
+"""
 
 from __future__ import annotations
 
@@ -8,88 +14,49 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 from harness2.core import tree as harness_tree
 from harness2.core.spec import BenchPrompts, BenchSpec, ChannelSpec
 from harness2.substrate.omp import OmpSubstrate
 from harness2.substrate.opencode import OpencodeSubstrate
+
 from .remediate import apply_dom_remediations, apply_inv_remediations
 
-TASK_SPECS: dict[str, dict[str, str]] = {
-    "artifact-security-gate": {
-        "domain": "openspec-sts",
-        "kind": "spec",
-        "path": "openspec/specs/artifact-security-gate/spec.md",
-        "prompt": (
-            "Audit and remediate the main OpenSpec specification `artifact-security-gate` "
-            "(`openspec/specs/artifact-security-gate/spec.md`) so that it satisfies all "
-            "`openspec/config.yaml` contracts, passes `openspec validate --strict`, replaces "
-            "any archive placeholder in `## Purpose` with accurate domain prose, and stays "
-            "aligned with `.github/workflows/secscan-gate.yaml` and `rockcraft.yaml`."
-        ),
-    },
-    "m2m-token-exchange": {
-        "domain": "openspec-sts",
-        "kind": "change",
-        "path": "openspec/changes/m2m-token-exchange",
-        "prompt": (
-            "Audit and remediate the OpenSpec change `m2m-token-exchange` "
-            "(`openspec/changes/m2m-token-exchange/`) so that `proposal.md`, `design.md`, "
-            "`tasks.md`, and `specs/m2m-token-exchange/spec.md` satisfy all `openspec/config.yaml` "
-            "contracts, resolve all relative Markdown links to `.archify/` and Go packages, "
-            "replace template placeholders in `Implementation Notes`, and align with the "
-            "RFC 8693 `ExchangeToken` implementation in `pkg/core/` and `pkg/authn/`."
-        ),
-    },
-    "support-multi-arch-rocks-and-pipelines": {
-        "domain": "openspec-sts",
-        "kind": "change",
-        "path": "openspec/changes/support-multi-arch-rocks-and-pipelines",
-        "prompt": (
-            "Audit and remediate the OpenSpec change `support-multi-arch-rocks-and-pipelines` "
-            "(`openspec/changes/support-multi-arch-rocks-and-pipelines/`) so that all relative "
-            "Markdown links in `proposal.md` and `tasks.md` resolve on disk, the delta spec "
-            "`specs/artifact-security-gate/spec.md` includes a non-placeholder `## Purpose` "
-            "and keeps every requirement body <= 500 characters, and `openspec validate --strict` "
-            "succeeds."
-        ),
-    },
-    "support-ubuntu-one-openid": {
-        "domain": "openspec-sts",
-        "kind": "change",
-        "path": "openspec/changes/support-ubuntu-one-openid",
-        "prompt": (
-            "Audit and remediate the OpenSpec change `support-ubuntu-one-openid` "
-            "(`openspec/changes/support-ubuntu-one-openid/`) so that `specs/openid-provider-login/spec.md` "
-            "keeps every requirement body <= 500 characters for `openspec validate --strict`, "
-            "all relative Markdown links in `design.md` resolve on disk, and `tasks.md` uses "
-            "numbered checkbox items in `Verification Suite`."
-        ),
-    },
-}
+HARNESS_MANIFEST = "openspec/harness.yaml"
 
-REPO_SYMLINKS: tuple[str, ...] = (
-    "api",
-    "cmd",
-    "docs",
-    "internal",
-    "k8s",
-    ".archify",
-    ".github",
-    ".trivyignore",
-    "Dockerfile",
-    "Makefile",
-    "README.md",
-    "build.sh",
-    "go.mod",
-    "go.sum",
-    "rockcraft.yaml",
-    "skaffold.yaml",
-    "structure-tests.yaml",
-)
+# Deterministic `c7` scripts the adapter materialises into every rollout
+# workspace from the repository's single source of truth (`scripts/`), and
+# which `harness_tree.validate` treats as runtime-provided (reserved) when a
+# candidate tree references them without carrying a copy.
+RUNTIME_SCRIPTS = frozenset({"validate_openspec.py", "check_openspec_drift.py"})
+
+
+def load_harness_manifest(repo_root: Path) -> dict:
+    """Load and validate `openspec/harness.yaml` for one repository."""
+    manifest_path = Path(repo_root) / HARNESS_MANIFEST
+    if not manifest_path.is_file():
+        raise FileNotFoundError(
+            f"{HARNESS_MANIFEST} not found under {repo_root}: the OpenSpec adapter is "
+            "manifest-driven; declare 'domain', 'repo_symlinks', and 'tasks' there."
+        )
+    with manifest_path.open("r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh) or {}
+    tasks = data.get("tasks")
+    if not isinstance(tasks, dict) or not tasks:
+        raise ValueError(f"{HARNESS_MANIFEST}: expected a non-empty 'tasks:' mapping")
+    for tid, spec in tasks.items():
+        if not isinstance(spec, dict) or spec.get("kind") not in ("spec", "change"):
+            raise ValueError(f"{HARNESS_MANIFEST}: tasks.{tid} needs 'kind: spec|change'")
+        if not spec.get("path") or not spec.get("prompt"):
+            raise ValueError(f"{HARNESS_MANIFEST}: tasks.{tid} needs 'path' and 'prompt'")
+    if not data.get("domain"):
+        raise ValueError(f"{HARNESS_MANIFEST}: 'domain' is required")
+    return data
 
 
 class OpenSpecAdapter:
-    """Adapts the secure-token-service OpenSpec specs and changes to harness2."""
+    """Adapts a repository's OpenSpec specs and changes to harness2."""
 
     def __init__(
         self,
@@ -104,6 +71,19 @@ class OpenSpecAdapter:
         self.runs_root = Path(runs_root or (self.harness2_dir / "runs" / "openspec_sts")).resolve()
         self.use_seed_base = use_seed_base
 
+        manifest = load_harness_manifest(self.repo_root)
+        self.domain = str(manifest["domain"])
+        self.repo_symlinks: tuple[str, ...] = tuple(str(r) for r in manifest.get("repo_symlinks") or ())
+        self.tasks_spec: dict[str, dict[str, str]] = {
+            tid: {
+                "domain": self.domain,
+                "kind": str(spec["kind"]),
+                "path": str(spec["path"]),
+                "prompt": str(spec["prompt"]),
+            }
+            for tid, spec in manifest["tasks"].items()
+        }
+
         if substrate_name in ("oc", "opencode"):
             self.substrate = OpencodeSubstrate()
             install_mode = "workspace_config"
@@ -114,6 +94,7 @@ class OpenSpecAdapter:
             channel = ChannelSpec("omp", "google/gemini-2.5-pro")
         else:
             raise ValueError(f"Unknown substrate {substrate_name!r}; expected 'oc' or 'omp'")
+
         prompts = BenchPrompts(
             work=(
                 "author, audit, and remediate OpenSpec specifications and change proposals "
@@ -171,24 +152,25 @@ class OpenSpecAdapter:
             domain_word="specification area",
             leak_globs=("audit_verdict.json",),
             allow_subagents=True,
+            reserved_scripts=RUNTIME_SCRIPTS,
         )
 
     def tasks(self, split: str = "all") -> list[str]:
         del split
-        return list(TASK_SPECS.keys())
+        return list(self.tasks_spec.keys())
 
     def reference_domain_order(self) -> list[str]:
-        return ["openspec-sts"]
+        return [self.domain]
 
     def domain_of(self, task_id: str) -> str:
-        return TASK_SPECS[task_id]["domain"]
+        return self.tasks_spec[task_id]["domain"]
 
     def task_prompt(self, task_id: str) -> str:
-        return TASK_SPECS[task_id]["prompt"]
+        return self.tasks_spec[task_id]["prompt"]
 
     def task_files(self, task_id: str) -> Path | None:
         baseline = self.harness2_dir / "fixtures" / "openspec_baseline" / "openspec"
-        if TASK_SPECS[task_id]["kind"] == "spec":
+        if self.tasks_spec[task_id]["kind"] == "spec":
             return baseline / "specs" / task_id
         return baseline / "changes" / task_id
 
@@ -197,12 +179,22 @@ class OpenSpecAdapter:
         if self.use_seed_base:
             return self.harness2_dir / "harnesses" / f"{prefix}_seed"
         return self.harness2_dir / "harnesses" / f"{prefix}_base"
+
     def validate_tree(self, tree: dict[str, str]) -> None:
-        if "scripts/validate_openspec.py" not in tree:
-            raise ValueError(
-                "The OpenSpec harness must retain `scripts/validate_openspec.py` so rollouts "
-                "can deterministically verify `openspec/config.yaml` and `--strict` compliance."
-            )
+        """The `c7` scripts are materialised from the repository's `scripts/`
+        (see `_prepare_workspace`), so candidate trees may reference them
+        without carrying a copy: they are `reserved_scripts` on the BenchSpec.
+        Here we only reject trees that ship a *broken* copy of a runtime script."""
+        for rel, src in tree.items():
+            base = rel.rsplit("/", 1)[-1]
+            if base in RUNTIME_SCRIPTS:
+                try:
+                    compile(src, rel, "exec")
+                except SyntaxError as exc:
+                    raise ValueError(
+                        f"{rel} does not compile ({exc}); runtime scripts are materialised "
+                        "from scripts/ and must not be forked broken"
+                    ) from exc
 
     @staticmethod
     def _has_inv_capability(hdir: Path) -> bool:
@@ -231,11 +223,19 @@ class OpenSpecAdapter:
         workspace.mkdir(parents=True, exist_ok=True)
         baseline_openspec = self.harness2_dir / "fixtures" / "openspec_baseline" / "openspec"
         shutil.copytree(baseline_openspec, workspace / "openspec")
-        for rel in REPO_SYMLINKS:
+        for rel in self.repo_symlinks:
             src = self.repo_root / rel
             dst = workspace / rel
             if src.exists() and not dst.exists():
                 dst.symlink_to(src)
+        # Materialise the deterministic `c7` scripts from the repository's
+        # single source of truth so rollouts (and their agents) always run the
+        # same validators as `make harness2-audit`.
+        (workspace / "scripts").mkdir(parents=True, exist_ok=True)
+        for script in sorted(RUNTIME_SCRIPTS):
+            src = self.repo_root / "scripts" / script
+            if src.is_file():
+                shutil.copy2(src, workspace / "scripts" / script)
 
     def execute(
         self, task_id: str, harness_dir: Path | None, run_id: str, *, timeout: int | None = None
@@ -283,7 +283,7 @@ class OpenSpecAdapter:
 
         val_script = hdir / "scripts" / "validate_openspec.py"
         if not val_script.is_file():
-            val_script = self.repo_root / "scripts" / "validate_openspec.py"
+            val_script = workspace / "scripts" / "validate_openspec.py"
         val_proc = subprocess.run(
             [
                 sys.executable,
@@ -312,13 +312,15 @@ class OpenSpecAdapter:
 
         drift_script = hdir / "scripts" / "check_openspec_drift.py"
         if not drift_script.is_file():
-            drift_script = self.repo_root / "scripts" / "check_openspec_drift.py"
+            drift_script = workspace / "scripts" / "check_openspec_drift.py"
         drift_proc = subprocess.run(
             [
                 sys.executable,
                 str(drift_script),
                 "--repo-root",
                 str(self.repo_root),
+                "--config",
+                str(self.repo_root / "openspec" / "drift-checks.yaml"),
                 "--target",
                 task_id,
                 "--json",
@@ -363,7 +365,7 @@ class OpenSpecAdapter:
             deliv_parts.append(f"- [{status}] `{r['id']}`: {r['detail']}")
 
         deliv_parts.extend(["", "## Artifact Contents"])
-        target_rel = TASK_SPECS[task_id]["path"]
+        target_rel = self.tasks_spec[task_id]["path"]
         target_path = workspace / target_rel
         if target_path.is_file():
             files_to_show = [target_path]

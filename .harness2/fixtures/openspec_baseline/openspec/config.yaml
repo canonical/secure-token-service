@@ -1,5 +1,23 @@
 schema: spec-driven
 
+validation:
+  max_requirement_chars: 500
+  require_mermaid_in_design: true
+  proposal_sections:
+    - Why
+    - What Changes
+    - Non-goals
+    - Success Metrics
+    - Capabilities
+    - Impact
+  design_sections:
+    - Context
+    - Goals
+    - Risks
+  tasks_checkbox_sections:
+    - Verification Suite
+    - Documentation & Rollout
+
 context: |
   Tech stack: Go (1.26), Valkey, PostgreSQL, Docker, Rockcraft, Kubernetes, OpenTelemetry, Prometheus, Zap
   Core libraries: github.com/coreos/go-oidc/v3, golang.org/x/oauth2, github.com/lestrrat-go/jwx/v2, github.com/chmike/securecookie, github.com/spf13/cobra
@@ -7,7 +25,7 @@ context: |
 
   Product language:
   - Write OpenSpec proposals and specs in user-facing product behavior language
-  - Requirements should describe the experience, observable behavior, and product contract
+  - Requirements should describe the experience, observable behavior, and the product contract
   - Put internal mechanisms in design.md or tasks.md unless the mechanism is itself part of the user-facing contract
   - Avoid technical jargon in proposals and specs when possible
 

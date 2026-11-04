@@ -12,7 +12,7 @@ from harness2.core import judge, report, schedule
 from harness2.core import tree as harness_tree
 from harness2.substrate.omp import OMP_SURFACE
 from harness2.substrate.opencode import OPENCODE_SURFACE
-from .adapter import OpenSpecAdapter
+from .adapter import RUNTIME_SCRIPTS, OpenSpecAdapter
 from .proposer import OpenSpecScriptedProposer
 from .remediate import apply_all_remediations
 
@@ -66,7 +66,12 @@ def cmd_validate_harnesses(args: argparse.Namespace) -> int:
         if rejected:
             print(f"[FAIL] {name}: off-surface files: {rejected}", file=sys.stderr)
             return 1
-        harness_tree.validate(surface, t, allow_subagents=True)
+        harness_tree.validate(
+            surface,
+            t,
+            allow_subagents=True,
+            reserved_scripts=harness_tree.RESERVED_SCRIPTS | RUNTIME_SCRIPTS,
+        )
         c = _census(surface, t)
         rows.append({"name": name, "surface": surface.name, "cap": surface.always_on_max, **c})
 

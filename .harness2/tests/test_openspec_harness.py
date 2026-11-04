@@ -9,7 +9,7 @@ from harness2.core import judge, report, schedule
 from harness2.core import tree as harness_tree
 from harness2.substrate.omp import OMP_SURFACE, OmpSubstrate
 from harness2.substrate.opencode import OPENCODE_SURFACE
-from openspec_harness.adapter import OpenSpecAdapter
+from openspec_harness.adapter import RUNTIME_SCRIPTS, OpenSpecAdapter
 from openspec_harness.proposer import OpenSpecScriptedProposer
 from openspec_harness.remediate import apply_dom_remediations, apply_inv_remediations
 
@@ -32,8 +32,15 @@ def test_c1_to_c8_harness_surfaces_valid() -> None:
         rejected: list[str] = []
         t = harness_tree.read_tree(surface, hdir, rejected=rejected)
         assert not rejected, f"{name} had off-surface files: {rejected}"
-        harness_tree.validate(surface, t, allow_subagents=True)
-        assert "scripts/validate_openspec.py" in t
+        # The c7 scripts are materialised by the adapter from scripts/ (single
+        # source of truth); harness trees carry no duplicate copies.
+        census = harness_tree.validate(
+            surface,
+            t,
+            allow_subagents=True,
+            reserved_scripts=harness_tree.RESERVED_SCRIPTS | RUNTIME_SCRIPTS,
+        )
+        assert census["scripts"] == 0, f"{name} carries duplicate c7 scripts: {census}"
     # Verify repo-root AGENTS.md + .agents/hooks.json + .agents/skills + sub_agents + scripts
     assert (REPO_ROOT / "AGENTS.md").is_file()
     assert (REPO_ROOT / ".agents" / "skills" / "openspec-detect-drift" / "SKILL.md").is_file()

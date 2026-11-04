@@ -1,0 +1,93 @@
+version: 1
+
+# Declarative code-to-spec drift checks for the Secure Token Service (STS).
+# Consumed by `openspec-drift` / `python3 scripts/check_openspec_drift.py`
+# (`openspec_harness.drift.check_drift`). Each top-level key is a spec or
+# change id (matching `openspec validate` targets); each entry maps a check id
+# to a repository file plus `needles` (literal substrings, all of which must
+# be present) and/or `regex` patterns (any of which must match) and optional
+# `must_exist` (default true).
+checks:
+  artifact-security-gate:
+    - id: pr_vuln_and_elf_gate
+      path: .github/workflows/unittest.yaml
+      needles:
+        - make govulncheck
+        - make build-all
+        - x86-64
+        - aarch64
+        - RISC-V
+    - id: candidate_scan_and_promote_gate
+      path: .github/workflows/ci.yaml
+      needles:
+        - _rock-scan.yaml
+        - _rock-promote.yaml
+        - gh-publish-candidate
+
+  m2m-token-exchange:
+    - id: proto_exchange_token_rpc
+      path: api/proto/v1/sts.proto
+      needles:
+        - rpc ExchangeToken
+        - ExchangeTokenRequest
+        - ExchangeResponse
+    - id: hydra_preemptive_jwks_verifier
+      path: internal/auth/hydra.go
+      needles:
+        - HydraTokenVerifier
+        - jwk.NewCache
+        - ErrTokenExpiringSoon
+        - 5 * time.Second
+    - id: grpc_exchange_token_handler
+      path: internal/grpc/server.go
+      needles:
+        - ExchangeToken
+        - "65536"
+        - "@serviceaccount.local"
+        - codes.InvalidArgument
+        - codes.Unauthenticated
+
+  support-multi-arch-rocks-and-pipelines:
+    - id: makefile_three_arch_binaries
+      path: Makefile
+      needles:
+        - "BINARY_ARCHS?=amd64 arm64 riscv64"
+        - "build-all:"
+    - id: rockcraft_two_arch_platforms
+      path: rockcraft.yaml
+      needles:
+        - "amd64:"
+        - "arm64:"
+        - CRAFT_ARCH_BUILD_FOR
+    - id: skaffold_and_dockerfile_multiarch
+      path: skaffold.yaml
+      needles:
+        - linux/amd64
+        - linux/arm64
+
+  support-ubuntu-one-openid:
+    - id: ubuntu_one_openid_client
+      path: internal/auth/openid/ubuntuone.go
+      needles:
+        - check_authentication
+        - openid.ns.sreg
+        - openid.ns.ax
+        - response_nonce
+    - id: standardized_cookie_manager
+      path: internal/cookie/cookie.go
+      needles:
+        - SetSessionCookie
+        - ClearSessionCookie
+        - SameSiteLaxMode
+        - X-Forwarded-Proto
+    - id: http_openid_callback_route
+      path: internal/http/server.go
+      needles:
+        - /auth/openid/callback
+        - handleOpenIDCallback
+        - handleLogin
+    - id: openapi_provider_and_callback_contract
+      path: docs/api/openapi.yaml
+      needles:
+        - /auth/openid/callback
+        - provider
