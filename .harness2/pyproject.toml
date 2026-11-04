@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sts-harness2-openspec"
+name = "openspec-harness"
 version = "0.1.0"
-description = "Google harness2 recursive agent harnessing configured for Secure Token Service OpenSpec workflows."
+description = "Config-driven OpenSpec validators and Google harness2 recursive agent harnessing for canonical repositories."
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
@@ -19,11 +19,9 @@ dev = [
 ]
 
 [project.scripts]
-harness2-openspec = "openspec_harness.cli:main"
-harness2-demo = "harness2.cli.demo:main"
-harness2-sweep = "harness2.cli.run_sweep:main"
-harness2-judge = "harness2.cli.judge:main"
-harness2-report = "harness2.cli.report:main"
+openspec-validate = "openspec_harness.validation:main"
+openspec-drift = "openspec_harness.drift:main"
+openspec-harness = "openspec_harness.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
