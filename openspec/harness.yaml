@@ -39,36 +39,38 @@ tasks:
       (`openspec/specs/artifact-security-gate/spec.md`) so that it satisfies all
       `openspec/config.yaml` contracts, passes `openspec validate --strict`, replaces
       any archive placeholder in `## Purpose` with accurate domain prose, and stays
-      aligned with `.github/workflows/secscan-gate.yaml` and `rockcraft.yaml`.
+      aligned with `.github/workflows/ci.yaml`, `.github/workflows/unittest.yaml`,
+      `.github/workflows/release.yaml`, and `rockcraft.yaml`.
 
   m2m-token-exchange:
     kind: change
-    path: openspec/changes/m2m-token-exchange
+    path: openspec/changes/archive/2026-10-29-m2m-token-exchange
     prompt: >-
-      Audit and remediate the OpenSpec change `m2m-token-exchange`
-      (`openspec/changes/m2m-token-exchange/`) so that `proposal.md`, `design.md`,
-      `tasks.md`, and `specs/m2m-token-exchange/spec.md` satisfy all `openspec/config.yaml`
-      contracts, resolve all relative Markdown links to `.archify/` and Go packages,
-      replace template placeholders in `Implementation Notes`, and align with the
-      RFC 8693 `ExchangeToken` implementation in `pkg/core/` and `pkg/authn/`.
+      Audit and remediate the archived OpenSpec change `m2m-token-exchange`
+      (`openspec/changes/archive/2026-10-29-m2m-token-exchange/`) so that `proposal.md`,
+      `design.md`, `tasks.md`, and `specs/m2m-token-exchange/spec.md` satisfy all
+      `openspec/config.yaml` contracts, resolve all relative Markdown links to `.archify/`
+      and Go packages, replace template placeholders in `Implementation Notes`, and align
+      with the RFC 8693 `ExchangeToken` implementation in `internal/grpc/server.go` and
+      `internal/auth/hydra.go`.
 
   support-multi-arch-rocks-and-pipelines:
     kind: change
-    path: openspec/changes/support-multi-arch-rocks-and-pipelines
+    path: openspec/changes/archive/2026-10-29-support-multi-arch-rocks-and-pipelines
     prompt: >-
-      Audit and remediate the OpenSpec change `support-multi-arch-rocks-and-pipelines`
-      (`openspec/changes/support-multi-arch-rocks-and-pipelines/`) so that all relative
-      Markdown links in `proposal.md` and `tasks.md` resolve on disk, the delta spec
-      `specs/artifact-security-gate/spec.md` includes a non-placeholder `## Purpose`
+      Audit and remediate the archived OpenSpec change `support-multi-arch-rocks-and-pipelines`
+      (`openspec/changes/archive/2026-10-29-support-multi-arch-rocks-and-pipelines/`) so that
+      all relative Markdown links in `proposal.md` and `tasks.md` resolve on disk, the delta
+      spec `specs/artifact-security-gate/spec.md` includes a non-placeholder `## Purpose`
       and keeps every requirement body <= 500 characters, and `openspec validate --strict`
       succeeds.
 
   support-ubuntu-one-openid:
     kind: change
-    path: openspec/changes/support-ubuntu-one-openid
+    path: openspec/changes/archive/2026-10-29-support-ubuntu-one-openid
     prompt: >-
-      Audit and remediate the OpenSpec change `support-ubuntu-one-openid`
-      (`openspec/changes/support-ubuntu-one-openid/`) so that `specs/openid-provider-login/spec.md`
-      keeps every requirement body <= 500 characters for `openspec validate --strict`,
-      all relative Markdown links in `design.md` resolve on disk, and `tasks.md` uses
-      numbered checkbox items in `Verification Suite`.
+      Audit and remediate the archived OpenSpec change `support-ubuntu-one-openid`
+      (`openspec/changes/archive/2026-10-29-support-ubuntu-one-openid/`) so that
+      `specs/openid-provider-login/spec.md` keeps every requirement body <= 500 characters
+      for `openspec validate --strict`, all relative Markdown links in `design.md` resolve
+      on disk, and `tasks.md` uses numbered checkbox items in `Verification Suite`.
