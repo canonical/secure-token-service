@@ -1600,10 +1600,9 @@ This repository uses **OpenSpec (`spec-driven` schema)** paired with the shared 
 # 1. Pull Go module dependencies and install build/lint tools
 make install-deps
 
-# 2. Pull the shared openspec-harness Python package from canonical/identity-team
-pip install "openspec-harness @ git+https://github.com/canonical/identity-team.git@main#subdirectory=tools/openspec-harness"
-# (or for local editable development from the in-tree toolkit)
-pip install -e ".harness2[dev]"
+# 2. Pull the shared openspec-harness Python package from canonical/identity-team,
+#    pinned by release tag in .harness2/requirements.txt
+make harness2-deps
 
 # 3. Ensure the OpenSpec CLI is available (via Node.js / npx)
 npx @fission-ai/openspec --version
@@ -1631,9 +1630,10 @@ To enforce OpenSpec validation in GitHub Actions, call the reusable workflow fro
 ```yaml
 jobs:
   openspec-validate:
-    uses: canonical/identity-team/.github/workflows/_openspec-validate.yaml@main
+    uses: canonical/identity-team/.github/workflows/_openspec-validate.yaml@v1.19.0
     with:
       drift-config: openspec/drift-checks.yaml
+      toolkit-ref: v1.19.0
 ```
 
 See [`.harness2/README.md`](./.harness2/README.md) for full details on the declarative configs (`openspec/config.yaml`, `openspec/drift-checks.yaml`) and `c1..c8` harness surface validation.

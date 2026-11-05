@@ -8,7 +8,7 @@ from pathlib import Path
 from harness2.core import tree as harness_tree
 from harness2.substrate.omp import OMP_SURFACE
 from harness2.substrate.opencode import OPENCODE_SURFACE
-from openspec_harness import RUNTIME_SCRIPTS
+from openspec_harness.adapter import RUNTIME_SCRIPTS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HARNESS2_DIR = REPO_ROOT / ".harness2"
