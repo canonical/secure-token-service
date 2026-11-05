@@ -44,7 +44,90 @@ During each recursive pass, `harness2` decomposes harness adaptation into two or
    - Maps OpenSpec capabilities (`artifact-security-gate`, `m2m-token-exchange`, `support-multi-arch-rocks-and-pipelines`, `support-ubuntu-one-openid`) to the Go 1.26 source tree (`internal/auth/`, `internal/grpc/`, `internal/http/`, `internal/cookie/`, `api/sts/v1/sts.proto`, `rockcraft.yaml`, `.github/workflows/`).
    - Eliminates archive `TBD` purpose placeholders and template `Implementation Notes` by synthesizing accurate architectural prose.
 
-## Quickstart Commands
+## Onboarding & Pulling Dependencies
+
+### 1. Prerequisites
+
+- **Python `>= 3.11`** (with `pip`, `pipx`, or `uv`)
+- **Node.js `>= 20` / `npx`** (for `@fission-ai/openspec` strict schema validation)
+- *(Optional)* `pytest >= 8.0` for running the test suite
+
+### 2. Pulling the Shared `openspec-harness` Dependency
+
+The generic toolkit is published in [`canonical/identity-team`](https://github.com/canonical/identity-team) under `tools/openspec-harness`. Pull and install it directly from git (pin to `@main`, a release tag, or a commit SHA):
+
+```bash
+# Install into your active virtualenv / Python environment
+pip install "openspec-harness @ git+https://github.com/canonical/identity-team.git@main#subdirectory=tools/openspec-harness"
+
+# Or install isolated CLI entrypoints via pipx / uv
+pipx install "openspec-harness @ git+https://github.com/canonical/identity-team.git@main#subdirectory=tools/openspec-harness"
+uv tool install "openspec-harness @ git+https://github.com/canonical/identity-team.git@main#subdirectory=tools/openspec-harness"
+
+# For local development inside this repository (editable install with test deps)
+pip install -e ".harness2[dev]"
+```
+
+Installing the package exposes three console entrypoints:
+- `openspec-validate` (`openspec_harness.validation:main`)
+- `openspec-drift` (`openspec_harness.drift:main`)
+- `openspec-harness` (`openspec_harness.cli:main` — subcommands: `init`, `validate-harnesses`, `audit`, `remediate`, `sweep`)
+
+### 3. Onboarding a New Repository
+
+From the root of an adopting `canonical/` repository:
+
+```bash
+# 1. Initialize OpenSpec if openspec/ does not exist yet
+npx @fission-ai/openspec init
+
+# 2. Scaffold the declarative manifests, scripts/ shims, and Makefile targets (idempotent)
+openspec-harness init
+```
+
+`openspec-harness init` scaffolds the following per-repository pieces (skipping any file that already exists):
+- `openspec/drift-checks.yaml` — declarative code-to-spec drift checks (`id`, `path`, `needles` / `regex`, `must_exist`)
+- `openspec/harness.yaml` — harness2 adapter manifest (`domain`, `repo_symlinks`, `tasks`)
+- `scripts/validate_openspec.py` & `scripts/check_openspec_drift.py` — executable shims delegating to `openspec_harness.validation:main` and `openspec_harness.drift:main`
+- `Makefile` — appends `harness2-validate`, `harness2-audit`, `harness2-remediate`, and `harness2-test` targets
+
+Next, customize the declarative configs for your service:
+1. **(Optional) Configure validation rules in `openspec/config.yaml`**:
+   ```yaml
+   validation:
+     max_requirement_chars: 500
+     require_mermaid_in_design: true
+     proposal_sections: [Why, What Changes, Non-goals, Success Metrics, Capabilities, Impact]
+     design_sections: [Context, Goals, Risks]
+     tasks_checkbox_sections: [Verification Suite, Documentation & Rollout]
+   ```
+2. **Populate `openspec/drift-checks.yaml`** with your capability/change IDs and source file `needles` / `regex` invariants.
+3. **Populate `openspec/harness.yaml`** with your `domain`, `repo_symlinks`, and `tasks` (pointing to `openspec/specs/<id>` or `openspec/changes/<id>`).
+4. **Verify locally**:
+   ```bash
+   openspec-harness audit
+   # or via the scaffolded shims / Makefile:
+   make harness2-audit
+   ```
+
+*(Domain skills such as `<service>-domain` and domain security reviewers remain repo-local by design.)*
+
+### 4. Onboarding CI with the Reusable Workflow
+
+Call the shared workflow from `canonical/identity-team` in `.github/workflows/ci.yaml` (or `.github/workflows/openspec.yaml`):
+
+```yaml
+jobs:
+  openspec-validate:
+    uses: canonical/identity-team/.github/workflows/_openspec-validate.yaml@main
+    with:
+      drift-config: openspec/drift-checks.yaml
+      python-version: "3.13"
+```
+
+The reusable workflow installs `openspec-harness` from `canonical/identity-team`, runs `openspec-validate`, runs `openspec-drift`, and executes `npx @fission-ai/openspec validate --all --strict`.
+
+## Quickstart Commands (In-Tree / STS)
 
 ```bash
 # 1. Validate all c1..c8 harness trees (opencode_seed, opencode_base, omp_seed, omp_base)
@@ -56,29 +139,10 @@ PYTHONPATH=.harness2 python3 -m openspec_harness.cli audit
 # 3. Run the two-level harness2 recursive sweep (OpenCode or OMP substrate, parallel & sequential modes, k=1,2)
 PYTHONPATH=.harness2 python3 -m openspec_harness.cli sweep --substrate oc --modes parallel,sequential --k 1,2
 PYTHONPATH=.harness2 python3 -m openspec_harness.cli sweep --substrate omp --modes parallel,sequential --k 1,2
+
 # 4. Apply INV+DOM OpenSpec remediations to the live repository
 PYTHONPATH=.harness2 python3 -m openspec_harness.cli remediate
 
-# 5. Run the test suite (upstream harness2 tests + OpenSpec integration tests)
+# 5. Run the test suite (config-driven unit tests + OpenSpec integration tests)
 PYTHONPATH=.harness2 pytest .harness2/tests -v
 ```
-
-## Multi-Repository Usage
-
-Install from a git ref (`#subdirectory=tools/openspec-harness` when consumed
-from `canonical/identity-team`):
-
-```bash
-pip install "openspec-harness @ git+https://github.com/canonical/identity-team.git@main#subdirectory=tools/openspec-harness"
-
-# Entrypoints (same engines the shims delegate to)
-openspec-validate --workspace . --repo-root . --json
-openspec-drift --repo-root . --config openspec/drift-checks.yaml --json
-
-# Scaffold the per-repo pieces into a new repository (idempotent)
-openspec-harness init
-```
-
-`init` generates `openspec/drift-checks.yaml`, `openspec/harness.yaml`, the
-`scripts/` shims, and `Makefile` `harness2-*` targets. Domain skills
-(`<service>-domain`) and security reviewers stay repo-local by design.

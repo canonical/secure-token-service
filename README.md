@@ -15,6 +15,7 @@ A Security Token Service implementing the Phantom Token Pattern for secure sessi
 - [Getting Started](#getting-started)
 - [API Reference](#api-reference)
 - [Security](#security)
+- [OpenSpec & Harness2 Onboarding](#openspec--harness2-onboarding)
 
 ---
 
@@ -1589,6 +1590,56 @@ type InterfaceName interface {
 Generated mocks are placed in `mocks/` subdirectories (gitignored).
 
 ---
+## OpenSpec & Harness2 Onboarding
+
+This repository uses **OpenSpec (`spec-driven` schema)** paired with the shared **`openspec-harness`** toolkit (published in [`canonical/identity-team`](https://github.com/canonical/identity-team) under `tools/openspec-harness` and vendored locally under [`.harness2/`](./.harness2/README.md)).
+
+### Pulling Dependencies
+
+```bash
+# 1. Pull Go module dependencies and install build/lint tools
+make install-deps
+
+# 2. Pull the shared openspec-harness Python package from canonical/identity-team
+pip install "openspec-harness @ git+https://github.com/canonical/identity-team.git@main#subdirectory=tools/openspec-harness"
+# (or for local editable development from the in-tree toolkit)
+pip install -e ".harness2[dev]"
+
+# 3. Ensure the OpenSpec CLI is available (via Node.js / npx)
+npx @fission-ai/openspec --version
+```
+
+### Onboarding a Repository
+
+To onboard a new `canonical/` repository to the shared OpenSpec validators and `harness2` adapter:
+
+```bash
+# 1. Initialize OpenSpec (creates openspec/config.yaml, openspec/specs/, openspec/changes/)
+npx @fission-ai/openspec init
+
+# 2. Scaffold drift-checks.yaml, harness.yaml, scripts/ shims, and Makefile targets
+openspec-harness init
+
+# 3. Run strict structural, relative-link, and code-to-spec drift checks
+openspec-harness audit
+# or:
+make harness2-audit
+```
+
+To enforce OpenSpec validation in GitHub Actions, call the reusable workflow from `canonical/identity-team`:
+
+```yaml
+jobs:
+  openspec-validate:
+    uses: canonical/identity-team/.github/workflows/_openspec-validate.yaml@main
+    with:
+      drift-config: openspec/drift-checks.yaml
+```
+
+See [`.harness2/README.md`](./.harness2/README.md) for full details on declarative manifests (`openspec/config.yaml`, `openspec/drift-checks.yaml`, `openspec/harness.yaml`) and `c1..c8` recursive harness sweeps.
+
+---
+
 
 ## License
 

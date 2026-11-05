@@ -18,18 +18,19 @@ def apply_inv_remediations(workspace_root: Path, target_id: str | None = None) -
     openspec_dir = workspace_root / "openspec"
     applied: list[str] = []
 
-    # 1. m2m-token-exchange: fix 4-level `../../../../.archify` links in 5-level deep spec.md
-    if target_id in (None, "m2m-token-exchange"):
-        m2m_spec = (
-            openspec_dir / "changes" / "m2m-token-exchange" / "specs" / "m2m-token-exchange" / "spec.md"
-        )
-        if m2m_spec.is_file():
-            txt = m2m_spec.read_text(encoding="utf-8")
-            if "../../../../.archify/" in txt and "../../../../../.archify/" not in txt:
-                txt = txt.replace("../../../../.archify/", "../../../../../.archify/")
-                m2m_spec.write_text(txt, encoding="utf-8")
+    # 1. Generic: fix 4-level `../../../../` links in 5-level deep spec.md files
+    # Pattern: openspec/changes/<id>/specs/<cap>/spec.md should use ../../../../../
+    for spec_file in openspec_dir.glob("changes/*/specs/*/spec.md"):
+        if target_id and target_id not in spec_file.parts:
+            continue
+        txt = spec_file.read_text(encoding="utf-8")
+        if "../../../../" in txt and "../../../../../" not in txt:
+            rel_path = spec_file.relative_to(workspace_root)
+            if len(rel_path.parts) == 6:  # openspec/changes/<id>/specs/<cap>/spec.md (5 parent dirs)
+                txt = txt.replace("../../../../", "../../../../../")
+                spec_file.write_text(txt, encoding="utf-8")
                 applied.append(
-                    "m2m-token-exchange/specs/m2m-token-exchange/spec.md: fixed relative depth to ../../../../../.archify/"
+                    f"{rel_path}: fixed relative link depth to ../../../../../"
                 )
 
     # 2. support-multi-arch-rocks-and-pipelines: fix relative links & >500-char requirements

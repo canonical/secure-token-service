@@ -1,4 +1,4 @@
-"""CLI entrypoint for Google's harness2 + OpenSpec integration in secure-token-service."""
+"""CLI entrypoint for Google's harness2 + OpenSpec integration."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from .remediate import apply_all_remediations
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path.cwd()
 
 
 def _census(surface: harness_tree.SurfaceSpec, t: harness_tree.Tree) -> dict[str, int]:
@@ -91,38 +91,34 @@ def cmd_validate_harnesses(args: argparse.Namespace) -> int:
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
-    root = _repo_root()
+    from .drift import check_drift
+    from .validation import validate_workspace
+
+    root = Path(args.repo_root).resolve() if args.repo_root else _repo_root()
     target_root = Path(args.root).resolve() if args.root else root
-    val_cmd = [
-        sys.executable,
-        str(root / "scripts" / "validate_openspec.py"),
-        "--workspace",
-        str(target_root),
-        "--repo-root",
-        str(root),
-    ]
-    drift_cmd = [
-        sys.executable,
-        str(root / "scripts" / "check_openspec_drift.py"),
-        "--repo-root",
-        str(root),
-    ]
-    if args.item:
-        val_cmd.extend(["--target", args.item])
-        drift_cmd.extend(["--target", args.item])
+    v = validate_workspace(target_root, repo_root=root, target_id=args.item)
+    d = check_drift(root, target_id=args.item)
+    ok = bool(v["all_checks_ok"] and d["all_checks_ok"])
     if args.json:
-        val_cmd.append("--json")
-        drift_cmd.append("--json")
-        v = json.loads(subprocess.run(val_cmd, capture_output=True, text=True).stdout)
-        d = json.loads(subprocess.run(drift_cmd, capture_output=True, text=True).stdout)
-        ok = bool(v["all_checks_ok"] and d["all_checks_ok"])
         print(json.dumps({"validation": v, "drift": d, "ok": ok}, indent=2))
         return 0 if ok else 1
 
-    r1 = subprocess.run(val_cmd)
+    v_status = "OK" if v["all_checks_ok"] else "FAILED"
+    print(
+        f"[validate_openspec] {v_status}: {v['checks_ok']}/{v['checks_total']} checks succeeded "
+        f"(target={v['target_id']})"
+    )
+    for f in v["findings"]:
+        print(f"  - {f}")
     print()
-    r2 = subprocess.run(drift_cmd)
-    return 0 if (r1.returncode == 0 and r2.returncode == 0) else 1
+    d_status = "OK" if d["all_checks_ok"] else "DRIFT_DETECTED"
+    print(
+        f"[check_openspec_drift] {d_status}: {d['checks_ok']}/{d['checks_total']} "
+        f"code-to-spec checks aligned (config={d['config']})"
+    )
+    for f in d["findings"]:
+        print(f"  - {f}")
+    return 0 if ok else 1
 
 
 def cmd_remediate(args: argparse.Namespace) -> int:
@@ -133,6 +129,16 @@ def cmd_remediate(args: argparse.Namespace) -> int:
         print(f"  - {a}")
     return 0
 
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    from .init import init_repository
+
+    repo = Path(args.root).resolve() if getattr(args, "root", None) else _repo_root()
+    written = init_repository(repo)
+    print(f"Scaffolded {len(written)} file(s) under {repo}.")
+    print("Next: edit openspec/harness.yaml tasks and openspec/drift-checks.yaml checks.")
+    return 0
 
 def cmd_sweep(args: argparse.Namespace) -> int:
     root = _repo_root()
@@ -228,10 +234,14 @@ def cmd_sweep(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="harness2-openspec",
-        description="Google harness2 recursive agent harness for OpenSpec in secure-token-service",
+        prog="openspec-harness",
+        description="Google harness2 recursive agent harness for OpenSpec",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_init = sub.add_parser("init", help="Scaffold OpenSpec harness config for this repository")
+    p_init.add_argument("--root", type=str, default=None, help="Repository root (default: current directory)")
+    p_init.set_defaults(func=cmd_init)
 
     p_val = sub.add_parser("validate-harnesses", help="Validate c1..c8 harness surfaces")
     p_val.add_argument("--json", action="store_true")
@@ -239,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_aud = sub.add_parser("audit", help="Run deterministic OpenSpec strict + code-drift checks")
     p_aud.add_argument("--root", type=str, default=None)
+    p_aud.add_argument("--repo-root", type=str, default=None, help="Repository root (default: current directory)")
     p_aud.add_argument("--item", type=str, default=None)
     p_aud.add_argument("--json", action="store_true")
     p_aud.set_defaults(func=cmd_audit)

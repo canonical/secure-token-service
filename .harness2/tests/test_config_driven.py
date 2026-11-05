@@ -123,3 +123,19 @@ def test_init_scaffolds_missing_pieces_idempotently(tmp_path: Path) -> None:
     manifest = load_harness_manifest(repo)
     assert manifest["domain"] == "openspec-example-service"
     assert "add-login" in manifest["tasks"]
+
+
+def test_cli_init_and_audit_subcommands(tmp_path: Path, monkeypatch) -> None:
+    """`openspec_harness.cli:main` registers `init` and `audit --repo-root`."""
+    from openspec_harness.cli import main as cli_main
+
+    repo = tmp_path / "cli-service"
+    (repo / "openspec" / "changes" / "add-auth").mkdir(parents=True)
+    (repo / "Makefile").write_text("build:\n\tgo build ./...\n", encoding="utf-8")
+
+    monkeypatch.chdir(repo)
+    assert cli_main(["init"]) == 0
+    assert (repo / "openspec" / "drift-checks.yaml").is_file()
+    assert (repo / "openspec" / "harness.yaml").is_file()
+
+    assert cli_main(["audit", "--root", str(REPO_ROOT), "--repo-root", str(REPO_ROOT), "--json"]) == 0
