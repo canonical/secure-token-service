@@ -1,14 +1,13 @@
-"""Tests for the manifest-driven adapter and the shared config-driven engines."""
+"""STS-specific tests for the shared config-driven engines (installed from
+canonical/identity-team; the engine's own packaged suite lives there)."""
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import yaml
 
 from openspec_harness.drift import check_drift, load_drift_config
-from openspec_harness.init import init_repository
 from openspec_harness.validation import load_validation_settings, validate_workspace
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -17,33 +16,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def test_openspec_config_validation_block_parsed() -> None:
     """`openspec/config.yaml` carries the strict `validation:` settings the
     generic engine reads."""
-    for cfg in (REPO_ROOT / "openspec" / "config.yaml",):
-        data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
-        v = data["validation"]
-        assert v["max_requirement_chars"] == 500
-        assert v["require_mermaid_in_design"] is True
-        assert "Why" in v["proposal_sections"]
-        assert "Verification Suite" in v["tasks_checkbox_sections"]
+    data = yaml.safe_load((REPO_ROOT / "openspec" / "config.yaml").read_text(encoding="utf-8"))
+    v = data["validation"]
+    assert v["max_requirement_chars"] == 500
+    assert v["require_mermaid_in_design"] is True
+    assert "Why" in v["proposal_sections"]
+    assert "Verification Suite" in v["tasks_checkbox_sections"]
 
     settings = load_validation_settings(REPO_ROOT)
     assert settings["max_requirement_chars"] == 500
     assert settings["require_mermaid_in_design"] is True
-
-
-def test_validation_settings_defaults_without_config() -> None:
-    """A repository without `openspec/config.yaml` inherits the strict defaults."""
-    empty = Path("/tmp/openspec-harness-empty-repo")
-    shutil.rmtree(empty, ignore_errors=True)
-    empty.mkdir(parents=True)
-    try:
-        (empty / "openspec").mkdir()
-        settings = load_validation_settings(empty)
-        assert settings == load_validation_settings(Path("/nonexistent"))
-        assert settings["max_requirement_chars"] == 500
-        assert settings["require_mermaid_in_design"] is True
-        assert len(settings["proposal_sections"]) == 6
-    finally:
-        shutil.rmtree(empty, ignore_errors=True)
 
 
 def test_drift_config_declarative_and_config_driven() -> None:
@@ -76,38 +58,3 @@ def test_validate_workspace_matches_config_drift_totals() -> None:
     assert d["all_checks_ok"], d["findings"]
     assert v["checks_total"] == 42
     assert d["checks_total"] == 12
-
-
-def test_init_scaffolds_missing_pieces_idempotently(tmp_path: Path) -> None:
-    """`init` generates the per-repo pieces into a bare repo, keeps existing
-    files untouched, and its manifest validates."""
-    repo = tmp_path / "example-service"
-    (repo / "openspec" / "changes" / "add-login").mkdir(parents=True)
-    (repo / "Makefile").write_text("build:\n\tgo build ./...\n", encoding="utf-8")
-
-    written = init_repository(repo)
-    names = {p.name for p in written}
-    assert {"drift-checks.yaml", "validate_openspec.py", "check_openspec_drift.py"} <= names
-    assert "harness2-audit:" in (repo / "Makefile").read_text(encoding="utf-8")
-
-    # Idempotent: a second run writes nothing and keeps file contents.
-    again = init_repository(repo)
-    assert again == []
-
-    # The scaffolded drift manifest validates against the loader.
-    assert "add-login" in load_drift_config(repo / "openspec" / "drift-checks.yaml")["checks"]
-
-
-def test_cli_init_and_audit_subcommands(tmp_path: Path, monkeypatch) -> None:
-    """`openspec_harness.cli:main` registers `init` and `audit --repo-root`."""
-    from openspec_harness.cli import main as cli_main
-
-    repo = tmp_path / "cli-service"
-    (repo / "openspec" / "changes" / "add-auth").mkdir(parents=True)
-    (repo / "Makefile").write_text("build:\n\tgo build ./...\n", encoding="utf-8")
-
-    monkeypatch.chdir(repo)
-    assert cli_main(["init"]) == 0
-    assert (repo / "openspec" / "drift-checks.yaml").is_file()
-
-    assert cli_main(["audit", "--root", str(REPO_ROOT), "--repo-root", str(REPO_ROOT), "--json"]) == 0
