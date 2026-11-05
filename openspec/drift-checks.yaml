@@ -2,11 +2,11 @@ version: 1
 
 # Declarative code-to-spec drift checks for the Secure Token Service (STS).
 # Consumed by `openspec-drift` / `python3 scripts/check_openspec_drift.py`
-# (`openspec_harness.drift.check_drift`). Each top-level key is a spec or
-# change id (matching `openspec validate` targets); each entry maps a check id
-# to a repository file plus `needles` (literal substrings, all of which must
-# be present) and/or `regex` patterns (any of which must match) and optional
-# `must_exist` (default true).
+# (`openspec_harness.drift.check_drift`). Each top-level key is a baseline
+# spec id (an active `openspec validate` target) or an archived change id;
+# each entry maps a check id to a repository file plus `needles` (literal
+# substrings, all of which must be present) and/or `regex` patterns (any of
+# which must match) and optional `must_exist` (default true).
 checks:
   artifact-security-gate:
     - id: pr_vuln_and_elf_gate
