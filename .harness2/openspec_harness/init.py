@@ -5,7 +5,6 @@
 harness2 OpenSpec adapter:
 
 - `openspec/drift-checks.yaml` (declarative code-to-spec drift checks stub)
-- `openspec/harness.yaml` (adapter manifest: domain, repo symlinks, tasks)
 - `scripts/validate_openspec.py` / `scripts/check_openspec_drift.py` shims
   over the package entrypoints
 - Makefile `harness2-*` targets
@@ -32,33 +31,6 @@ checks:
       path: Makefile
       needles:
         - "build:"
-"""
-
-HARNESS_TEMPLATE = """version: 1
-
-# Repository manifest consumed by the `openspec_harness` adapter
-# (`openspec_harness.adapter.OpenSpecAdapter`).
-schema: spec-driven
-domain: openspec-{service}
-
-# Repository entries materialised into each rollout workspace so the drift
-# checker and skills can resolve real source files.
-repo_symlinks:
-  - Makefile
-  - README.md
-
-# OpenSpec spec/change ids targeted by sweeps, with their artifact path
-# (`kind: spec` baseline specs, `kind: change` bundles) and rollout prompt.
-tasks:
-  {first_task}:
-    kind: change
-    path: openspec/changes/{first_task}
-    prompt: >-
-      Audit and remediate the OpenSpec change `{first_task}`
-      (`openspec/changes/{first_task}/`) so that `proposal.md`, `design.md`,
-      `tasks.md`, and `specs/*/spec.md` satisfy all `openspec/config.yaml`
-      contracts, resolve all relative Markdown links, keep every requirement
-      body <= 500 characters, and pass `openspec validate --strict`.
 """
 
 VALIDATE_SHIM = '''#!/usr/bin/env python3
@@ -100,7 +72,7 @@ if __name__ == "__main__":
 MAKEFILE_SNIPPET = """
 # OpenSpec harness2 targets
 harness2-validate:
-\tPYTHONPATH=.harness2 python3 -m openspec_harness.cli validate-harnesses
+\tpython3 -m openspec_harness.cli validate-harnesses
 .PHONY: harness2-validate
 
 harness2-audit:
@@ -108,12 +80,8 @@ harness2-audit:
 \tpython3 scripts/check_openspec_drift.py --repo-root .
 .PHONY: harness2-audit
 
-harness2-remediate:
-\tPYTHONPATH=.harness2 python3 -m openspec_harness.cli remediate
-.PHONY: harness2-remediate
-
 harness2-test:
-\tPYTHONPATH=.harness2 pytest .harness2/tests -v
+\tpytest tools/openspec-harness/tests -v
 .PHONY: harness2-test
 """
 
@@ -155,13 +123,9 @@ def init_repository(repo_root: Path) -> list[Path]:
         first_task = "example-change"
 
     written: list[Path] = []
-    service = repo_root.name
 
     p = openspec_dir / "drift-checks.yaml"
     if _write_if_absent(p, DRIFT_TEMPLATE.format(first_task=first_task)):
-        written.append(p)
-    p = openspec_dir / "harness.yaml"
-    if _write_if_absent(p, HARNESS_TEMPLATE.format(first_task=first_task, service=service)):
         written.append(p)
     p = repo_root / "scripts" / "validate_openspec.py"
     if _write_if_absent(p, VALIDATE_SHIM):
@@ -187,57 +151,14 @@ def init_repository(repo_root: Path) -> list[Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="openspec-harness",
-        description=(
-            "OpenSpec harness tooling: shared validators, harness2 sweeps, remediation, "
-            "and repository scaffolding."
-        ),
+        description="Scaffold OpenSpec harness config for this repository.",
     )
-    sub = parser.add_subparsers(dest="cmd")
-
-    sub.add_parser("init", help="Scaffold OpenSpec harness config for this repository")
-
-    p_val = sub.add_parser("validate-harnesses", help="Validate c1..c8 harness surfaces")
-    p_val.add_argument("--json", action="store_true")
-
-    p_aud = sub.add_parser("audit", help="Run strict + drift validation")
-    p_aud.add_argument("--root", default=None)
-    p_aud.add_argument("--item", default=None)
-    p_aud.add_argument("--json", action="store_true")
-
-    p_rem = sub.add_parser("remediate", help="Apply INV+DOM remediations")
-    p_rem.add_argument("--root", default=None)
-    p_rem.add_argument("--item", default=None)
-
-    p_swp = sub.add_parser("sweep", help="Run two-level harness2 recursion")
-    p_swp.add_argument("--substrate", choices=("oc", "omp"), default="oc")
-    p_swp.add_argument("--modes", default="parallel,sequential")
-    p_swp.add_argument("--k", default="1,2")
-    p_swp.add_argument("--seed", type=int, default=None)
-    p_swp.add_argument("--tag", default="")
-    p_swp.add_argument("--runs-root", default=None)
-    p_swp.add_argument("--from-full-base", action="store_true")
-
-    # Import siblings lazily so `init` works without the harness2 core imports.
-    from .cli import cmd_audit, cmd_remediate, cmd_sweep, cmd_validate_harnesses
-
-    args = parser.parse_args(argv)
-    if args.cmd == "init":
-        repo = Path(args.__dict__.get("root") or Path.cwd())
-        written = init_repository(repo)
-        print(f"Scaffolded {len(written)} file(s) under {repo}.")
-        print("Next: edit openspec/harness.yaml tasks and openspec/drift-checks.yaml checks.")
-        return 0
-    if args.cmd == "validate-harnesses":
-        return int(cmd_validate_harnesses(args))
-    if args.cmd == "audit":
-        return int(cmd_audit(args))
-    if args.cmd == "remediate":
-        return int(cmd_remediate(args))
-    if args.cmd == "sweep":
-        return int(cmd_sweep(args))
-    parser.print_help()
-    return 2
-
+    parser.parse_args(argv)
+    repo = Path.cwd()
+    written = init_repository(repo)
+    print(f"Scaffolded {len(written)} file(s) under {repo}.")
+    print("Next: edit openspec/drift-checks.yaml checks.")
+    return 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
