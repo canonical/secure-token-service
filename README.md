@@ -1617,7 +1617,7 @@ To onboard a new `canonical/` repository to the shared OpenSpec validators and `
 # 1. Initialize OpenSpec (creates openspec/config.yaml, openspec/specs/, openspec/changes/)
 npx @fission-ai/openspec init
 
-# 2. Scaffold drift-checks.yaml, harness.yaml, scripts/ shims, and Makefile targets
+# 2. Scaffold drift-checks.yaml, scripts/ shims, and Makefile targets
 openspec-harness init
 
 # 3. Run strict structural, relative-link, and code-to-spec drift checks
@@ -1636,7 +1636,7 @@ jobs:
       drift-config: openspec/drift-checks.yaml
 ```
 
-See [`.harness2/README.md`](./.harness2/README.md) for full details on declarative manifests (`openspec/config.yaml`, `openspec/drift-checks.yaml`, `openspec/harness.yaml`) and `c1..c8` recursive harness sweeps.
+See [`.harness2/README.md`](./.harness2/README.md) for full details on the declarative configs (`openspec/config.yaml`, `openspec/drift-checks.yaml`) and `c1..c8` harness surface validation.
 
 ---
 

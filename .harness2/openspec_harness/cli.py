@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
 
-from harness2.core import judge, report, schedule
 from harness2.core import tree as harness_tree
 from harness2.substrate.omp import OMP_SURFACE
 from harness2.substrate.opencode import OPENCODE_SURFACE
-from .adapter import RUNTIME_SCRIPTS, OpenSpecAdapter
-from .proposer import OpenSpecScriptedProposer
-from .remediate import apply_all_remediations
+
+from . import RUNTIME_SCRIPTS
 
 
 def _repo_root() -> Path:
@@ -121,114 +118,13 @@ def cmd_audit(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def cmd_remediate(args: argparse.Namespace) -> int:
-    root = Path(args.root).resolve() if args.root else _repo_root()
-    actions = apply_all_remediations(root, args.item)
-    print(f"Applied {len(actions)} OpenSpec INV+DOM remediations under {root}:")
-    for a in actions:
-        print(f"  - {a}")
-    return 0
-
-
-
 def cmd_init(args: argparse.Namespace) -> int:
     from .init import init_repository
 
     repo = Path(args.root).resolve() if getattr(args, "root", None) else _repo_root()
     written = init_repository(repo)
     print(f"Scaffolded {len(written)} file(s) under {repo}.")
-    print("Next: edit openspec/harness.yaml tasks and openspec/drift-checks.yaml checks.")
-    return 0
-
-def cmd_sweep(args: argparse.Namespace) -> int:
-    root = _repo_root()
-    runs_root = Path(args.runs_root).resolve() if args.runs_root else (root / ".harness2" / "runs" / "openspec_sts")
-    modes = tuple(schedule.mode_token(m) for m in args.modes.split(",") if m.strip())
-    k_values = [int(x.strip()) for x in str(args.k).split(",") if x.strip()]
-
-    adapter = OpenSpecAdapter(
-        root,
-        substrate_name=args.substrate,
-        runs_root=runs_root,
-        use_seed_base=not args.from_full_base,
-    )
-    prop = OpenSpecScriptedProposer(root, substrate_name=args.substrate)
-
-    all_scored: list[judge.Scored] = []
-    base_scored: list[judge.Scored] = []
-    fell_back: dict[tuple[str, int], int] = {}
-
-    for k in k_values:
-        library_root = runs_root / "library" / f"k{k}"
-        rep = schedule.run_sweep(
-            k,
-            adapter=adapter,
-            prop=prop,
-            runs_root=runs_root,
-            library_root=library_root,
-            split="all",
-            modes=modes,
-            seed=args.seed,
-            tag=args.tag,
-            domain_parallel=1,
-            pool_policy="finals",
-        )
-
-        # Collect selections and base rollouts for judging
-        selections: list[dict] = []
-        base_seen: set[str] = set()
-        for task_id in adapter.tasks("all"):
-            base_ns = schedule.Namespace(adapter.spec.name, adapter.substrate.name, "agg", k, args.seed, args.tag)
-            summary_path = base_ns.task_dir(runs_root, task_id) / "summary.json"
-            if not summary_path.is_file():
-                continue
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            if k == k_values[0] and task_id not in base_seen and summary.get("base"):
-                b0 = summary["base"][0]
-                base_scored.append(
-                    judge.judge_one(
-                        adapter,
-                        task_id,
-                        "base",
-                        0,
-                        b0["label"],
-                        b0["run_id"],
-                        Path(b0["run_dir"]),
-                        chosen_is_base=True,
-                    )
-                )
-                base_seen.add(task_id)
-            for m in modes:
-                m_rec = (summary.get("modes") or {}).get(m) or {}
-                fell_back[(m, k)] = fell_back.get((m, k), 0) + len(m_rec.get("fell_back") or [])
-                sel = (summary.get("selections") or {}).get(m)
-                if sel:
-                    selections.append(sel)
-
-        scored = judge.judge_selections(adapter, selections)
-        judge.write(scored, runs_root / "_judged" / f"openspec-{adapter.substrate.name}-k{k}.json")
-        all_scored.extend(scored)
-        del rep
-
-    judge.write(base_scored, runs_root / "_judged" / f"openspec-{adapter.substrate.name}-base.json")
-    summaries = report.summarise(all_scored, fell_back=fell_back)
-    base_summary = report.summarise(base_scored)
-
-    print("\n" + "=" * 76)
-    if base_summary:
-        b = base_summary[0]
-        print(
-            f"  seed baseline (k=0): n={b.n:>3} | score {b.score:6.2f}% | "
-            f"all-checks-pass {b.all_pass:5.1f}%"
-        )
-    print(
-        report.render(
-            summaries,
-            title=f"harness2 x OpenSpec Adaptation Sweep (substrate={adapter.substrate.name})",
-            bench="lab",
-        )
-    )
-    print("=" * 76)
+    print("Next: edit openspec/drift-checks.yaml checks.")
     return 0
 
 
@@ -253,21 +149,6 @@ def main(argv: list[str] | None = None) -> int:
     p_aud.add_argument("--item", type=str, default=None)
     p_aud.add_argument("--json", action="store_true")
     p_aud.set_defaults(func=cmd_audit)
-
-    p_rem = sub.add_parser("remediate", help="Apply INV+DOM OpenSpec remediations to the workspace")
-    p_rem.add_argument("--root", type=str, default=None)
-    p_rem.add_argument("--item", type=str, default=None)
-    p_rem.set_defaults(func=cmd_remediate)
-
-    p_swp = sub.add_parser("sweep", help="Run two-level harness2 recursion over OpenSpec tasks")
-    p_swp.add_argument("--substrate", choices=("oc", "omp"), default="oc")
-    p_swp.add_argument("--modes", default="parallel,sequential")
-    p_swp.add_argument("--k", default="1,2")
-    p_swp.add_argument("--seed", type=int, default=None)
-    p_swp.add_argument("--tag", default="")
-    p_swp.add_argument("--runs-root", default=None)
-    p_swp.add_argument("--from-full-base", action="store_true")
-    p_swp.set_defaults(func=cmd_sweep)
 
     args = parser.parse_args(argv)
     return int(args.func(args))

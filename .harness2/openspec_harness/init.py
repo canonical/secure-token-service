@@ -5,7 +5,6 @@
 harness2 OpenSpec adapter:
 
 - `openspec/drift-checks.yaml` (declarative code-to-spec drift checks stub)
-- `openspec/harness.yaml` (adapter manifest: domain, repo symlinks, tasks)
 - `scripts/validate_openspec.py` / `scripts/check_openspec_drift.py` shims
   over the package entrypoints
 - Makefile `harness2-*` targets
@@ -32,33 +31,6 @@ checks:
       path: Makefile
       needles:
         - "build:"
-"""
-
-HARNESS_TEMPLATE = """version: 1
-
-# Repository manifest consumed by the `openspec_harness` adapter
-# (`openspec_harness.adapter.OpenSpecAdapter`).
-schema: spec-driven
-domain: openspec-{service}
-
-# Repository entries materialised into each rollout workspace so the drift
-# checker and skills can resolve real source files.
-repo_symlinks:
-  - Makefile
-  - README.md
-
-# OpenSpec spec/change ids targeted by sweeps, with their artifact path
-# (`kind: spec` baseline specs, `kind: change` bundles) and rollout prompt.
-tasks:
-  {first_task}:
-    kind: change
-    path: openspec/changes/{first_task}
-    prompt: >-
-      Audit and remediate the OpenSpec change `{first_task}`
-      (`openspec/changes/{first_task}/`) so that `proposal.md`, `design.md`,
-      `tasks.md`, and `specs/*/spec.md` satisfy all `openspec/config.yaml`
-      contracts, resolve all relative Markdown links, keep every requirement
-      body <= 500 characters, and pass `openspec validate --strict`.
 """
 
 VALIDATE_SHIM = '''#!/usr/bin/env python3
@@ -108,10 +80,6 @@ harness2-audit:
 \tpython3 scripts/check_openspec_drift.py --repo-root .
 .PHONY: harness2-audit
 
-harness2-remediate:
-\tpython3 -m openspec_harness.cli remediate
-.PHONY: harness2-remediate
-
 harness2-test:
 \tpytest tools/openspec-harness/tests -v
 .PHONY: harness2-test
@@ -155,13 +123,9 @@ def init_repository(repo_root: Path) -> list[Path]:
         first_task = "example-change"
 
     written: list[Path] = []
-    service = repo_root.name
 
     p = openspec_dir / "drift-checks.yaml"
     if _write_if_absent(p, DRIFT_TEMPLATE.format(first_task=first_task)):
-        written.append(p)
-    p = openspec_dir / "harness.yaml"
-    if _write_if_absent(p, HARNESS_TEMPLATE.format(first_task=first_task, service=service)):
         written.append(p)
     p = repo_root / "scripts" / "validate_openspec.py"
     if _write_if_absent(p, VALIDATE_SHIM):
@@ -193,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     repo = Path.cwd()
     written = init_repository(repo)
     print(f"Scaffolded {len(written)} file(s) under {repo}.")
-    print("Next: edit openspec/harness.yaml tasks and openspec/drift-checks.yaml checks.")
+    print("Next: edit openspec/drift-checks.yaml checks.")
     return 0
 
 if __name__ == "__main__":

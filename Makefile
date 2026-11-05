@@ -133,18 +133,6 @@ harness2-audit:
 	python3 scripts/check_openspec_drift.py --repo-root . --config openspec/drift-checks.yaml
 .PHONY: harness2-audit
 
-harness2-sweep:
-	PYTHONPATH=.harness2 python3 -m openspec_harness.cli sweep --substrate oc --modes parallel,sequential --k 1,2
-.PHONY: harness2-sweep
-
-harness2-sweep-omp:
-	PYTHONPATH=.harness2 python3 -m openspec_harness.cli sweep --substrate omp --modes parallel,sequential --k 1,2
-.PHONY: harness2-sweep-omp
-
-harness2-remediate:
-	PYTHONPATH=.harness2 python3 -m openspec_harness.cli remediate
-.PHONY: harness2-remediate
-
 harness2-test:
 	PYTHONPATH=.harness2 pytest .harness2/tests -v
 .PHONY: harness2-test

@@ -7,8 +7,6 @@ from pathlib import Path
 
 import yaml
 
-from openspec_harness import OpenSpecAdapter
-from openspec_harness.adapter import RUNTIME_SCRIPTS, load_harness_manifest
 from openspec_harness.drift import check_drift, load_drift_config
 from openspec_harness.init import init_repository
 from openspec_harness.validation import load_validation_settings, validate_workspace
@@ -18,11 +16,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def test_openspec_config_validation_block_parsed() -> None:
     """`openspec/config.yaml` carries the strict `validation:` settings the
-    generic engine reads, and the fixture baseline stays in sync."""
-    for cfg in (
-        REPO_ROOT / "openspec" / "config.yaml",
-        REPO_ROOT / ".harness2" / "fixtures" / "openspec_baseline" / "openspec" / "config.yaml",
-    ):
+    generic engine reads."""
+    for cfg in (REPO_ROOT / "openspec" / "config.yaml",):
         data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
         v = data["validation"]
         assert v["max_requirement_chars"] == 500
@@ -73,26 +68,6 @@ def test_drift_config_declarative_and_config_driven() -> None:
     assert {c["id"].split(":", 1)[0] for c in scoped["checks"]} == {"m2m-token-exchange"}
 
 
-def test_harness_manifest_drives_adapter() -> None:
-    """`openspec/harness.yaml` is the single source of adapter state: tasks,
-    domain, and repo symlinks come from the manifest, not the adapter code."""
-    manifest = load_harness_manifest(REPO_ROOT)
-    assert manifest["domain"] == "openspec-sts"
-    assert "api" in manifest["repo_symlinks"]
-    assert set(manifest["tasks"]) == {
-        "artifact-security-gate",
-        "m2m-token-exchange",
-        "support-multi-arch-rocks-and-pipelines",
-        "support-ubuntu-one-openid",
-    }
-
-    adapter = OpenSpecAdapter(REPO_ROOT, runs_root=Path("/tmp/x-runs"))
-    assert adapter.domain == manifest["domain"]
-    assert adapter.tasks() == list(manifest["tasks"].keys())
-    assert adapter.task_prompt("m2m-token-exchange") == manifest["tasks"]["m2m-token-exchange"]["prompt"]
-    assert adapter.spec.reserved_scripts == RUNTIME_SCRIPTS
-
-
 def test_validate_workspace_matches_config_drift_totals() -> None:
     """The config-driven engines produce the same totals the audit command reports."""
     v = validate_workspace(REPO_ROOT, repo_root=REPO_ROOT)
@@ -112,17 +87,15 @@ def test_init_scaffolds_missing_pieces_idempotently(tmp_path: Path) -> None:
 
     written = init_repository(repo)
     names = {p.name for p in written}
-    assert {"drift-checks.yaml", "harness.yaml", "validate_openspec.py", "check_openspec_drift.py"} <= names
+    assert {"drift-checks.yaml", "validate_openspec.py", "check_openspec_drift.py"} <= names
     assert "harness2-audit:" in (repo / "Makefile").read_text(encoding="utf-8")
 
     # Idempotent: a second run writes nothing and keeps file contents.
     again = init_repository(repo)
     assert again == []
 
-    # The scaffolded manifest validates against the loader.
-    manifest = load_harness_manifest(repo)
-    assert manifest["domain"] == "openspec-example-service"
-    assert "add-login" in manifest["tasks"]
+    # The scaffolded drift manifest validates against the loader.
+    assert "add-login" in load_drift_config(repo / "openspec" / "drift-checks.yaml")["checks"]
 
 
 def test_cli_init_and_audit_subcommands(tmp_path: Path, monkeypatch) -> None:
@@ -136,6 +109,5 @@ def test_cli_init_and_audit_subcommands(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(repo)
     assert cli_main(["init"]) == 0
     assert (repo / "openspec" / "drift-checks.yaml").is_file()
-    assert (repo / "openspec" / "harness.yaml").is_file()
 
     assert cli_main(["audit", "--root", str(REPO_ROOT), "--repo-root", str(REPO_ROOT), "--json"]) == 0
