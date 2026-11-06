@@ -2,7 +2,6 @@
 
 ## Purpose
 The artifact security gate guarantees that no container image or release artifact is published to `stable` with known un-triaged security vulnerabilities, enforces shift-left Go vulnerability and multi-architecture binary checks before container builds, and runs continuous scheduled scans on published artifacts.
-
 ## Requirements
 
 ### Requirement: Pull request vulnerability pre-check
