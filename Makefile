@@ -1,4 +1,4 @@
-# Makefile for Session Service (Janus)
+# Makefile for Session Service
 
 .PHONY: all build build-all test clean run install-deps proto
 
@@ -122,4 +122,23 @@ fmt:
 # Lint code (requires golangci-lint)
 lint:
 	golangci-lint run
+
+# Google harness2 x OpenSpec targets
+harness2-deps:
+	python3 -m pip install -r .harness2/requirements.txt
+.PHONY: harness2-deps
+
+harness2-validate:
+	python3 -m openspec_harness.cli validate-harnesses
+.PHONY: harness2-validate
+
+harness2-audit:
+	python3 scripts/validate_openspec.py --workspace . --repo-root .
+	python3 scripts/check_openspec_drift.py --repo-root . --config openspec/drift-checks.yaml
+.PHONY: harness2-audit
+
+harness2-test:
+	pytest .harness2/tests -v
+.PHONY: harness2-test
+
 

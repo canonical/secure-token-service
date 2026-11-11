@@ -1,8 +1,8 @@
-# Secure Token Service (STS) - Janus (ID052)
+# Secure Token Service (STS) - STS (ID052)
 
 A Security Token Service implementing the Phantom Token Pattern for secure session management and internal JWT issuance.
 
-> **Specification**: [ID052 - Session Service (Janus)](https://docs.google.com/document/d/1jIt1WbS6CLxpFIW0hWhQUhX7xN2qr43_xOALT5zHoKs/edit?usp=sharing)
+> **Specification**: [ID052 - Session Service](https://docs.google.com/document/d/1jIt1WbS6CLxpFIW0hWhQUhX7xN2qr43_xOALT5zHoKs/edit?usp=sharing)
 
 ## Table of Contents
 
@@ -15,6 +15,7 @@ A Security Token Service implementing the Phantom Token Pattern for secure sessi
 - [Getting Started](#getting-started)
 - [API Reference](#api-reference)
 - [Security](#security)
+- [OpenSpec & Harness2 Onboarding](#openspec--harness2-onboarding)
 
 ---
 
@@ -37,7 +38,7 @@ The **Secure Token Service (STS)** is a Policy Enforcement Point (PEP) and token
 
 ```mermaid
 graph LR
-    A[Browser/Client] -->|1. OIDC Login| B[Janus STS]
+    A[Browser/Client] -->|1. OIDC Login| B[STS]
     B -->|2. HttpOnly Cookie| A
     A -->|3. Cookie + Request| C[API Gateway]
     C -->|4. gRPC: ExchangeSession| B
@@ -61,7 +62,7 @@ graph TB
         Browser[Browser/Client]
     end
     
-    subgraph "Janus STS (PEP)"
+    subgraph "STS (PEP)"
         HTTP[HTTP Server<br/>Port 8080]
         GRPC[gRPC Server<br/>Port 9090]
         KM[Key Manager]
@@ -107,29 +108,29 @@ graph TB
 ```mermaid
 sequenceDiagram
     participant Browser
-    participant Janus
+    participant STS
     participant OIDC as OIDC Provider<br/>(e.g., Kratos)
     participant Valkey
     
-    Browser->>Janus: GET /auth/login?return_to=/dashboard
-    Janus->>Janus: Generate state & nonce
-    Janus->>Browser: Set encrypted cookies (state, nonce)
-    Janus->>Browser: 302 Redirect to OIDC Provider
+    Browser->>STS: GET /auth/login?return_to=/dashboard
+    STS->>STS: Generate state & nonce
+    STS->>Browser: Set encrypted cookies (state, nonce)
+    STS->>Browser: 302 Redirect to OIDC Provider
     
     Browser->>OIDC: User authenticates
     OIDC->>Browser: 302 Redirect with auth code
     
-    Browser->>Janus: GET /auth/callback?code=...&state=...
-    Janus->>Janus: Validate state
-    Janus->>OIDC: Exchange code for tokens
-    OIDC->>Janus: ID Token + Access Token
-    Janus->>Janus: Verify ID Token (nonce, signature)
+    Browser->>STS: GET /auth/callback?code=...&state=...
+    STS->>STS: Validate state
+    STS->>OIDC: Exchange code for tokens
+    OIDC->>STS: ID Token + Access Token
+    STS->>STS: Verify ID Token (nonce, signature)
     
-    Janus->>Valkey: Store session (ID → tokens + user info)
-    Valkey-->>Janus: OK
+    STS->>Valkey: Store session (ID → tokens + user info)
+    Valkey-->>STS: OK
     
-    Janus->>Browser: Set HttpOnly Cookie (session_id)
-    Janus->>Browser: 302 Redirect to /dashboard
+    STS->>Browser: Set HttpOnly Cookie (session_id)
+    STS->>Browser: 302 Redirect to /dashboard
 ```
 
 ### 2. Session Exchange Flow (Phantom Token Pattern)
@@ -138,28 +139,28 @@ sequenceDiagram
 sequenceDiagram
     participant Client as Browser
     participant Gateway as API Gateway
-    participant Janus as Janus STS
+    participant STS as STS
     participant Valkey
     participant Postgres
     participant Service as Microservice
     
     Client->>Gateway: Request + Cookie (session_id)
-    Gateway->>Janus: gRPC: ExchangeSession(session_id)
+    Gateway->>STS: gRPC: ExchangeSession(session_id)
     
-    Janus->>Valkey: Get session by ID
-    Valkey-->>Janus: Session data (user_id, upstream_token, ...)
+    STS->>Valkey: Get session by ID
+    Valkey-->>STS: Session data (user_id, upstream_token, ...)
     
-    Janus->>Postgres: GetLatestActiveKey()
-    Postgres-->>Janus: Private key + KID
+    STS->>Postgres: GetLatestActiveKey()
+    Postgres-->>STS: Private key + KID
     
-    Janus->>Janus: Mint JWT (ES256)<br/>Claims: sub, iss, aud, exp, custom
-    Janus-->>Gateway: Internal JWT + expires_in
+    STS->>STS: Mint JWT (ES256)<br/>Claims: sub, iss, aud, exp, custom
+    STS-->>Gateway: Internal JWT + expires_in
     
     Gateway->>Service: Request + Authorization: Bearer <JWT>
-    Service->>Janus: GET /.well-known/jwks.json (cached)
-    Janus->>Postgres: GetAllPublicKeys()
-    Postgres-->>Janus: Active + retired keys
-    Janus-->>Service: JWK Set
+    Service->>STS: GET /.well-known/jwks.json (cached)
+    STS->>Postgres: GetAllPublicKeys()
+    Postgres-->>STS: Active + retired keys
+    STS-->>Service: JWK Set
     
     Service->>Service: Verify JWT signature using JWKS
     Service-->>Gateway: Response
@@ -188,7 +189,7 @@ sequenceDiagram
     CLI->>Postgres: GetLatestActiveKey() [verify]
     Postgres-->>CLI: New key
     
-    CLI-->>Admin: ✓ Rotation complete<br/>New KID: janus-key-xyz<br/>Old keys moved to retired set
+    CLI-->>Admin: ✓ Rotation complete<br/>New KID: sts-key-xyz<br/>Old keys moved to retired set
     
     Note over Postgres: JWKS endpoint now returns:<br/>- 1 active key (signing)<br/>- N retired keys (verification)
 ```
@@ -325,7 +326,7 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 ```json
 {
   "kty": "EC",
-  "kid": "janus-key-a1b2c3d4",
+  "kid": "sts-key-a1b2c3d4",
   "use": "sig",
   "alg": "ES256",
   "private_pem": "-----BEGIN EC PRIVATE KEY-----\n...",
@@ -1197,7 +1198,7 @@ Returns the JSON Web Key Set containing all public keys (active + retired) for J
       "kty": "EC",
       "use": "sig",
       "alg": "ES256",
-      "kid": "janus-key-a1b2c3d4",
+      "kid": "sts-key-a1b2c3d4",
       "crv": "P-256",
       "x": "<base64url-encoded-x-coordinate>",
       "y": "<base64url-encoded-y-coordinate>"
@@ -1206,7 +1207,7 @@ Returns the JSON Web Key Set containing all public keys (active + retired) for J
       "kty": "EC",
       "use": "sig",
       "alg": "ES256",
-      "kid": "janus-key-retired-xyz",
+      "kid": "sts-key-retired-xyz",
       "crv": "P-256",
       "x": "<base64url-encoded-x-coordinate>",
       "y": "<base64url-encoded-y-coordinate>"
@@ -1232,7 +1233,7 @@ Returns the JSON Web Key Set containing all public keys (active + retired) for J
 
 ### Best Practices
 
-1. **Network Isolation**: Deploy Janus in trusted network, restrict gRPC access
+1. **Network Isolation**: Deploy STS in trusted network, restrict gRPC access
 2. **TLS Everywhere**: Use mTLS for gRPC, HTTPS for HTTP endpoints
 3. **Key Rotation**: Rotate JWKS every 90 days (automated via cron)
 4. **Session Expiry**: Align JWT expiry with upstream token expiry
@@ -1589,6 +1590,56 @@ type InterfaceName interface {
 Generated mocks are placed in `mocks/` subdirectories (gitignored).
 
 ---
+## OpenSpec & Harness2 Onboarding
+
+This repository uses **OpenSpec (`spec-driven` schema)** paired with the shared **`openspec-harness`** toolkit (published in [`canonical/identity-team`](https://github.com/canonical/identity-team) under `tools/openspec-harness` and vendored locally under [`.harness2/`](./.harness2/README.md)).
+
+### Pulling Dependencies
+
+```bash
+# 1. Pull Go module dependencies and install build/lint tools
+make install-deps
+
+# 2. Pull the shared openspec-harness Python package from canonical/identity-team,
+#    pinned by release tag in .harness2/requirements.txt
+make harness2-deps
+
+# 3. Ensure the OpenSpec CLI is available (via Node.js / npx)
+npx @fission-ai/openspec --version
+```
+
+### Onboarding a Repository
+
+To onboard a new `canonical/` repository to the shared OpenSpec validators and `harness2` adapter:
+
+```bash
+# 1. Initialize OpenSpec (creates openspec/config.yaml, openspec/specs/, openspec/changes/)
+npx @fission-ai/openspec init
+
+# 2. Scaffold drift-checks.yaml, scripts/ shims, and Makefile targets
+openspec-harness init
+
+# 3. Run strict structural, relative-link, and code-to-spec drift checks
+openspec-harness audit
+# or:
+make harness2-audit
+```
+
+To enforce OpenSpec validation in GitHub Actions, call the reusable workflow from `canonical/identity-team`:
+
+```yaml
+jobs:
+  openspec-validate:
+    uses: canonical/identity-team/.github/workflows/_openspec-validate.yaml@v1.19.0
+    with:
+      drift-config: openspec/drift-checks.yaml
+      toolkit-ref: v1.19.0
+```
+
+See [`.harness2/README.md`](./.harness2/README.md) for full details on the declarative configs (`openspec/config.yaml`, `openspec/drift-checks.yaml`) and `c1..c8` harness surface validation.
+
+---
+
 
 ## License
 

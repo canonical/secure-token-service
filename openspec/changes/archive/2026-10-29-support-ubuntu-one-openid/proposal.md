@@ -2,7 +2,7 @@
 
 ## Why
 
-Currently, the Secure Token Service (Janus) only supports OpenID Connect (OIDC) through a single upstream identity provider. Canonical services and environments frequently require authentication via Canonical's Ubuntu One SSO (`login.ubuntu.com/+openid`), which operates using the OpenID 2.0 protocol. Furthermore, cookie creation logic is currently fragmented between `CookieManager` and inline HTTP response handling in `server.go`, leading to inconsistent security flags (such as hardcoded `Secure: true` and missing `SameSite` settings).
+Currently, the Secure Token Service only supports OpenID Connect (OIDC) through a single upstream identity provider. Canonical services and environments frequently require authentication via Canonical's Ubuntu One SSO (`login.ubuntu.com/+openid`), which operates using the OpenID 2.0 protocol. Furthermore, cookie creation logic is currently fragmented between `CookieManager` and inline HTTP response handling in `server.go`, leading to inconsistent security flags (such as hardcoded `Secure: true` and missing `SameSite` settings).
 
 Introducing Ubuntu One OpenID provider support via dedicated login and callback endpoints, standardizing cookie generation, and normalizing token claims allows seamless identity federation across both OIDC and OpenID 2.0 while maintaining identical external cookie and internal JWT contracts for downstream microservices.
 
