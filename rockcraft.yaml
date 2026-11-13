@@ -1,7 +1,7 @@
 name: secure-token-service
 base: bare
 build-base: ubuntu@24.04
-version: 0.6.0
+version: 0.7.0
 summary: Canonical Identity Platform Secure Token Service
 description: >
   This is the Canonical Identity Platform Secure Token Service used for handling
@@ -27,12 +27,17 @@ parts:
     build-packages:
       - make
       - git
-    override-build: |
+    override-build: >
       export GOOS=linux
+
       export GOARCH="${CRAFT_ARCH_BUILD_FOR}"
+
       export CGO_ENABLED=0
+
       make build
-      install -D -m755 ./bin/app ${CRAFT_PART_INSTALL}/opt/secure-token-service/bin/app
+
+      install -D -m755 ./bin/app
+      ${CRAFT_PART_INSTALL}/opt/secure-token-service/bin/app
     organize:
       opt/secure-token-service/bin/app: usr/bin/app
       etc/ssl/certs/ca-certificates.crt: etc/ssl/certs/ca-certificates.crt
