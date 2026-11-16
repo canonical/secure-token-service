@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/canonical/secure-token-service/compare/v0.7.0...v1.0.0) (2026-11-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **deps:** migrate lestrrat-go/jwx from v2 to v4.6.0
+
+### Features
+
+* **deps:** migrate lestrrat-go/jwx from v2 to v4.6.0 ([df0e9e2](https://github.com/canonical/secure-token-service/commit/df0e9e2e21ad8eca7fa2efed2110f812f4bc643b))
+
 ## [0.7.0](https://github.com/canonical/secure-token-service/compare/v0.6.0...v0.7.0) (2026-11-11)
 
 
