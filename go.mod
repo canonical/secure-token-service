@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/chmike/securecookie v1.4.1
+	github.com/chmike/securecookie/v2 v2.0.1
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
