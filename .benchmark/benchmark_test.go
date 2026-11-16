@@ -8,8 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
-	chmike "github.com/chmike/securecookie"
+	chmike "github.com/chmike/securecookie/v2"
 	"github.com/gorilla/securecookie"
 )
 
@@ -24,8 +25,7 @@ func BenchmarkGorillaEncodeDecode(b *testing.B) {
 	s := securecookie.New(hashKey, blockKey)
 	encoded, _ := s.Encode(cookieName, payload)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		var decoded map[string]string
 		_ = s.Decode(cookieName, encoded, &decoded)
 	}
@@ -33,7 +33,8 @@ func BenchmarkGorillaEncodeDecode(b *testing.B) {
 
 func BenchmarkChmikеEncodeDecode(b *testing.B) {
 	// chmike/securecookie uses an HTTP-based API, so we benchmark with mock HTTP objects
-	s, _ := chmike.New(cookieName, hashKey, chmike.Params{Secure: true})
+	keys, _ := chmike.NewKeyStore(hashKey)
+	s, _ := chmike.New(cookieName, keys, time.Hour)
 
 	// Marshal payload to bytes (chmike works with []byte)
 	payloadBytes, _ := json.Marshal(payload)
@@ -49,14 +50,13 @@ func BenchmarkChmikеEncodeDecode(b *testing.B) {
 	}
 	cookieValue := cookies[0].Value
 
-	// Create a request with the cookie for decoding
+	// Create a request with the cookie for decoding (v2 prefixes the name with __Host-)
 	req := httptest.NewRequest("GET", "/", nil)
-	req.AddCookie(&http.Cookie{Name: cookieName, Value: cookieValue})
+	req.AddCookie(&http.Cookie{Name: s.Name(), Value: cookieValue})
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		// Decode: Extract value from cookie
-		decodedBytes, _ := s.GetValue(nil, req)
+		decodedBytes, _, _ := s.Value(nil, req)
 		var decoded map[string]string
 		_ = json.Unmarshal(decodedBytes, &decoded)
 	}

@@ -1,5 +1,5 @@
-github.com/chmike/securecookie v1.4.1 h1:I6H1Mj5Y8mAtyREmgyrdQ+VYyh9U/2MMACLWzQMeQ50=
-github.com/chmike/securecookie v1.4.1/go.mod h1:8n//DHGbx8hQGv0lLwo3p4LgXAUCka/0cSy/Ek0CXiE=
+github.com/chmike/securecookie/v2 v2.0.1 h1:pTkafblFaaGcVE1Xrt0T9ip3LMLr9YmUyN50OMigcLg=
+github.com/chmike/securecookie/v2 v2.0.1/go.mod h1:51xpiIr3vNbsMODZs8pVV8yCEZ4o77HR8BZwU1tNrbw=
 github.com/google/gofuzz v1.2.0 h1:xRy4A+RhZaiKjJ1bPfwQ8sedCA+YS2YcCHW6ec7JMi0=
 github.com/google/gofuzz v1.2.0/go.mod h1:dBl0BpW6vV/+mYPU4Po3pmUjxk6FQPldtuIdl/M65Eg=
 github.com/gorilla/securecookie v1.1.1/go.mod h1:ra0sb63/xPlUeL+yeDciTfxMRAA+MP+HVt/4epWDjd4=

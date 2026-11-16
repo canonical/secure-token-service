@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/canonical/secure-token-service/internal/cookie"
 	"github.com/canonical/secure-token-service/internal/session"
 	"go.uber.org/mock/gomock"
 )
@@ -49,7 +50,7 @@ func TestHandleHome_EmptySessionCookie(t *testing.T) {
 	server := NewServer(nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "session_id", Value: ""})
+	req.AddCookie(&http.Cookie{Name: cookie.SessionCookieName, Value: ""})
 	w := httptest.NewRecorder()
 
 	server.handleHome(w, req)
@@ -80,7 +81,7 @@ func TestHandleHome_InvalidSessionCookie(t *testing.T) {
 	server := NewServer(nil, nil, mockCookieManager, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "session_id", Value: "invalid_cookie_value"})
+	req.AddCookie(&http.Cookie{Name: cookie.SessionCookieName, Value: "invalid_cookie_value"})
 	w := httptest.NewRecorder()
 
 	server.handleHome(w, req)
@@ -118,7 +119,7 @@ func TestHandleHome_SessionNotFound(t *testing.T) {
 	server := NewServer(mockSessionStore, nil, mockCookieManager, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "session_id", Value: "valid_cookie"})
+	req.AddCookie(&http.Cookie{Name: cookie.SessionCookieName, Value: "valid_cookie"})
 	w := httptest.NewRecorder()
 
 	server.handleHome(w, req)
@@ -156,7 +157,7 @@ func TestHandleHome_SessionReturnsNil(t *testing.T) {
 	server := NewServer(mockSessionStore, nil, mockCookieManager, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "session_id", Value: "valid_cookie"})
+	req.AddCookie(&http.Cookie{Name: cookie.SessionCookieName, Value: "valid_cookie"})
 	w := httptest.NewRecorder()
 
 	server.handleHome(w, req)
@@ -204,7 +205,7 @@ func TestHandleHome_Authenticated(t *testing.T) {
 	server := NewServer(mockSessionStore, nil, mockCookieManager, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "session_id", Value: "valid_cookie"})
+	req.AddCookie(&http.Cookie{Name: cookie.SessionCookieName, Value: "valid_cookie"})
 	w := httptest.NewRecorder()
 
 	server.handleHome(w, req)
@@ -261,7 +262,7 @@ func TestHandleHome_TokenMasking(t *testing.T) {
 	server := NewServer(mockSessionStore, nil, mockCookieManager, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "session_id", Value: "valid_cookie"})
+	req.AddCookie(&http.Cookie{Name: cookie.SessionCookieName, Value: "valid_cookie"})
 	w := httptest.NewRecorder()
 
 	server.handleHome(w, req)
@@ -314,7 +315,7 @@ func TestHandleHome_NoRefreshToken(t *testing.T) {
 	server := NewServer(mockSessionStore, nil, mockCookieManager, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "session_id", Value: "valid_cookie"})
+	req.AddCookie(&http.Cookie{Name: cookie.SessionCookieName, Value: "valid_cookie"})
 	w := httptest.NewRecorder()
 
 	server.handleHome(w, req)
@@ -356,7 +357,7 @@ func TestHandleHome_ExpiredSession(t *testing.T) {
 	server := NewServer(mockSessionStore, nil, mockCookieManager, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "session_id", Value: "valid_cookie"})
+	req.AddCookie(&http.Cookie{Name: cookie.SessionCookieName, Value: "valid_cookie"})
 	w := httptest.NewRecorder()
 
 	server.handleHome(w, req)
@@ -401,7 +402,7 @@ func TestHandleHome_ActiveSession(t *testing.T) {
 	server := NewServer(mockSessionStore, nil, mockCookieManager, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "session_id", Value: "valid_cookie"})
+	req.AddCookie(&http.Cookie{Name: cookie.SessionCookieName, Value: "valid_cookie"})
 	w := httptest.NewRecorder()
 
 	server.handleHome(w, req)
@@ -665,7 +666,7 @@ func TestHandleHome_ContextPropagation(t *testing.T) {
 	server := NewServer(mockSessionStore, nil, mockCookieManager, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{Name: "session_id", Value: "valid_cookie"})
+	req.AddCookie(&http.Cookie{Name: cookie.SessionCookieName, Value: "valid_cookie"})
 	w := httptest.NewRecorder()
 
 	server.handleHome(w, req)
