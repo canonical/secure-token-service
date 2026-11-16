@@ -18,7 +18,7 @@ import (
 	stsv1 "github.com/canonical/secure-token-service/api/proto/v1"
 	"github.com/canonical/secure-token-service/internal/auth"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -40,7 +40,7 @@ func TestExchangeToken_EndToEndIntegration(t *testing.T) {
 		t.Fatalf("failed to generate RSA key: %v", err)
 	}
 
-	pubJWK, err := jwk.FromRaw(rsaKey.Public())
+	pubJWK, err := jwk.Import[jwk.Key](rsaKey.Public())
 	if err != nil {
 		t.Fatalf("failed to create JWK from RSA public key: %v", err)
 	}

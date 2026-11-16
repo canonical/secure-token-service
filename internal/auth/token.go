@@ -17,7 +17,7 @@ import (
 	"github.com/canonical/secure-token-service/internal/db"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/valkey-io/valkey-go"
 )
 
@@ -243,7 +243,7 @@ func (km *KeyManager) GetJWK() (jwk.Key, error) {
 
 	kid, _ := keyData["kid"].(string)
 
-	key, err := jwk.FromRaw(publicKey)
+	key, err := jwk.Import[jwk.Key](publicKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JWK from public key: %w", err)
 	}
@@ -301,7 +301,7 @@ func (km *KeyManager) getAllJWKSFromDB() (jwk.Set, error) {
 		}
 
 		// Create JWK
-		key, err := jwk.FromRaw(ecdsaPublicKey)
+		key, err := jwk.Import[jwk.Key](ecdsaPublicKey)
 		if err != nil {
 			continue
 		}
