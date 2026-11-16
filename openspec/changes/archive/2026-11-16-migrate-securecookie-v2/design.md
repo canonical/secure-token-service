@@ -2,7 +2,7 @@
 
 ## Context
 
-`internal/cookie` wraps `github.com/chmike/securecookie` v1.3.5. The v1 API takes a `Params` struct per cookie object, allows `Secure: false`, and checks value age only at decode time. v2.0.1 (`github.com/chmike/securecookie/v2`) replaces `Params` with a mandatory `maxAge` at `New`, forces the `__Host-` name prefix with `Secure`, `HttpOnly`, and `Path=/`, removes `Domain` and `SameSite=None`, and derives encryption keys from a 32-byte seed via `KeyStore`. See proposal.md for motivation.
+`internal/cookie` wraps `github.com/chmike/securecookie` v1.4.1. The v1 API takes a `Params` struct per cookie object, allows `Secure: false`, and checks value age only at decode time. v2.0.1 (`github.com/chmike/securecookie/v2`) replaces `Params` with a mandatory `maxAge` at `New`, forces the `__Host-` name prefix with `Secure`, `HttpOnly`, and `Path=/`, removes `Domain` and `SameSite=None`, and derives encryption keys from a 32-byte seed via `KeyStore`. See proposal.md for motivation.
 
 ```mermaid
 flowchart LR
@@ -69,7 +69,7 @@ Alternatives considered: a single shared session cookie object with a fixed life
 - [Existing sessions and in-flight logins break at deploy] → Accepted breaking change; re-authentication recovers. Call it out in release notes.
 - [Plain-HTTP local development stops working for login] → Document the limitation; developers use TLS locally or browser localhost exceptions.
 - [v2 rejects cookie values older than `maxAge` and keys older than 400 days] → Same effective behavior as today for 600-second state cookies and hour-scale sessions.
-- [PR #82 bumps `go` and other dependencies] → Whichever PR merges second rebases `go.mod`/`go.sum`; the conflict is trivial.
+- [PR #85 bumps `go` and other dependencies] → Whichever PR merges second rebases `go.mod`/`go.sum`; the conflict is trivial.
 
 ## Migration Plan
 

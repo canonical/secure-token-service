@@ -115,8 +115,15 @@ func (m *CookieManager) Encode(name string, value string) (string, error) {
 // maxAge <= 0 disables the age check (up to the securecookie maximum of 400 days).
 func (m *CookieManager) Decode(name, value string, maxAge int) (string, error) {
 	maxAgeSec := maxAge
+	maxAgeSecCeil := int(securecookie.MaxMaxAge / time.Second)
 	if maxAgeSec <= 0 {
-		maxAgeSec = int(securecookie.MaxMaxAge / time.Second)
+		maxAgeSec = maxAgeSecCeil
+	}
+	if maxAgeSec > maxAgeSecCeil {
+		maxAgeSec = maxAgeSecCeil
+	}
+	if maxAgeSec < 1 {
+		maxAgeSec = 1
 	}
 
 	obj, err := securecookie.New(name, m.keyStore, time.Duration(maxAgeSec)*time.Second, securecookie.WithSameSiteLax())
@@ -143,6 +150,12 @@ func (m *CookieManager) Decode(name, value string, maxAge int) (string, error) {
 // SameSite=Lax, and a Max-Age derived from expiresAt.
 func (m *CookieManager) SetSessionCookie(w http.ResponseWriter, r *http.Request, sessionID string, expiresAt time.Time) error {
 	maxAge := time.Until(expiresAt).Truncate(time.Second)
+	if maxAge < time.Second {
+		maxAge = time.Second
+	}
+	if maxAge > securecookie.MaxMaxAge {
+		maxAge = securecookie.MaxMaxAge
+	}
 	obj, err := securecookie.New(sessionCookieBaseName, m.keyStore, maxAge, securecookie.WithSameSiteLax())
 	if err != nil {
 		return fmt.Errorf("failed to create session cookie: %w", err)

@@ -2,7 +2,7 @@
 
 ## 1. Dependency upgrade
 
-- [x] 1.1 Replace `github.com/chmike/securecookie` v1.3.5 with `github.com/chmike/securecookie/v2` v2.0.1 in `go.mod` and `.benchmark/go.mod`, then run `go mod tidy` in both modules and verify builds resolve.
+- [x] 1.1 Replace `github.com/chmike/securecookie` v1.4.1 with `github.com/chmike/securecookie/v2` v2.0.1 in `go.mod` and `.benchmark/go.mod`, then run `go mod tidy` in both modules and verify builds resolve.
 - [x] 1.2 Run `trivy fs --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --quiet .` and verify zero findings in `go.mod`.
 
 ## 2. Cookie manager migration
@@ -32,5 +32,5 @@
 ## Implementation Notes
 
 - `go test -short -count=1 ./...` fails only in `internal/auth` (valkey cache), `internal/db` (postgres), and `internal/session` (valkey); all three panic in testcontainers setup because no Docker daemon is available locally. All other packages pass.
-- Trivy reports 4 HIGH findings in `go.mod` (go-jose v4.1.5, klauspost/compress v1.18.3, moby/go-archive v0.2.0, golang.org/x/net v0.60.0). These exist identically on `main` and are unrelated to securecookie; the securecookie upgrade itself is clean. Broader dependency bumps are covered by PR #82.
+- Trivy reports 4 HIGH findings in `go.mod` (go-jose v4.1.5, klauspost/compress v1.18.3, moby/go-archive v0.2.0, golang.org/x/net v0.60.0). These exist identically on `main` and are unrelated to securecookie; the securecookie upgrade itself is clean. Broader dependency bumps are covered by PR #85.
 - Benchmark loops were modernized to `for b.Loop()` while migrating `.benchmark/benchmark_test.go` to the v2 API.

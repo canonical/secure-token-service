@@ -7,22 +7,6 @@ For architectural diagrams and component details, see [Architecture Design: Stan
 
 ## Requirements
 
-### Requirement: Centralized session cookie issuance
-All session cookies (`__Host-session_id`) set by the service SHALL be constructed through `CookieManager`. Handcrafted `http.Cookie` definitions for session management in HTTP handlers SHALL NOT be permitted. The session cookie value SHALL be encrypted and authenticated using authenticated encryption (AEAD). **Breaking change**: the session cookie carries a `Max-Age` derived from the session lifetime instead of an `Expires` timestamp.
-
-#### Scenario: Successful login sets standardized session cookie
-- **WHEN** user authentication succeeds via either OIDC or OpenID
-- **THEN** the system issues a `Set-Cookie` header for `__Host-session_id` configured with `HttpOnly: true`, `Secure: true`, `SameSite: Lax`, `Path: "/"`, and `Max-Age` aligned with the session lifetime
-- **THEN** the cookie value is encrypted and tamper-proof
-
-#### Scenario: Session cookie value expires after the configured lifetime
-- **WHEN** a client presents a session cookie value older than the configured session lifetime
-- **THEN** the system rejects the value and treats the request as unauthenticated
-
-#### Scenario: Session cookie value with no lifetime limit
-- **WHEN** the system decodes a session cookie value with the lifetime check disabled
-- **THEN** the system accepts values up to the maximum cookie lifetime of 400 days enforced by the cookie library
-
 ### Requirement: Host-prefixed cookie names
 The system SHALL issue every authentication and session cookie with the `__Host-` name prefix, `Path: "/"`, `HttpOnly: true`, `Secure: true`, and no `Domain` attribute. The system SHALL reject pre-upgrade cookies that lack the `__Host-` prefix.
 
@@ -44,6 +28,22 @@ The system SHALL always set the `Secure` attribute on service-issued cookies, in
 #### Scenario: Plain HTTP request still sets Secure flag
 - **WHEN** an authentication or session cookie is generated for a plain HTTP request without secure forward headers
 - **THEN** the emitted `Set-Cookie` header still contains `; Secure`, and local development requires HTTPS or a browser localhost exception
+
+### Requirement: Centralized session cookie issuance
+All session cookies (`__Host-session_id`) set by the service SHALL be constructed through `CookieManager`. Handcrafted `http.Cookie` definitions for session management in HTTP handlers SHALL NOT be permitted. The session cookie value SHALL be encrypted and authenticated using authenticated encryption (AEAD). **Breaking change**: the session cookie carries a `Max-Age` derived from the session lifetime instead of an `Expires` timestamp.
+
+#### Scenario: Successful login sets standardized session cookie
+- **WHEN** user authentication succeeds via either OIDC or OpenID
+- **THEN** the system issues a `Set-Cookie` header for `__Host-session_id` configured with `HttpOnly: true`, `Secure: true`, `SameSite: Lax`, `Path: "/"`, and `Max-Age` aligned with the session lifetime
+- **THEN** the cookie value is encrypted and tamper-proof
+
+#### Scenario: Session cookie value expires after the configured lifetime
+- **WHEN** a client presents a session cookie value older than the configured session lifetime
+- **THEN** the system rejects the value and treats the request as unauthenticated
+
+#### Scenario: Session cookie value with no lifetime limit
+- **WHEN** the system decodes a session cookie value with the lifetime check disabled
+- **THEN** the system accepts values up to the maximum cookie lifetime of 400 days enforced by the cookie library
 
 ### Requirement: Standardized cookie clearing on logout
 When a user logs out, the system SHALL clear the session cookie through `CookieManager` using standardized attributes (`Path: "/"`, `HttpOnly: true`, `Secure: true`, `SameSite: Lax`) with an expiration timestamp in the past.
