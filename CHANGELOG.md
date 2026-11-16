@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/canonical/secure-token-service/compare/v1.0.0...v1.0.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **deps:** update module github.com/testcontainers/testcontainers-go/modules/postgres to v0.45.0 ([154fabd](https://github.com/canonical/secure-token-service/commit/154fabdf2e682d363df09e942ed64a325eed064f))
+
 ## [1.0.0](https://github.com/canonical/secure-token-service/compare/v0.7.0...v1.0.0) (2026-11-16)
 
 
