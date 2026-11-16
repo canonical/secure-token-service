@@ -18,7 +18,7 @@ import (
 	"github.com/canonical/secure-token-service/internal/auth/openid"
 	"github.com/canonical/secure-token-service/internal/cookie"
 	"github.com/canonical/secure-token-service/internal/session"
-	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"go.uber.org/mock/gomock"
 )
 

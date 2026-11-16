@@ -347,18 +347,18 @@ func TestKeyManager_GetJWK(t *testing.T) {
 	}
 
 	// Verify metadata
-	kid := jwkKey.KeyID()
-	if kid == "" {
+	kid, ok := jwkKey.KeyID()
+	if !ok || kid == "" {
 		t.Error("JWK should have a key ID")
 	}
 
-	alg := jwkKey.Algorithm()
-	if alg.String() != "ES256" {
+	alg, ok := jwkKey.Algorithm()
+	if !ok || alg.String() != "ES256" {
 		t.Errorf("Algorithm mismatch: got %v, want ES256", alg)
 	}
 
-	usage := jwkKey.KeyUsage()
-	if usage != "sig" {
+	usage, ok := jwkKey.KeyUsage()
+	if !ok || usage != "sig" {
 		t.Errorf("Key usage mismatch: got %v, want sig", usage)
 	}
 }
@@ -459,8 +459,10 @@ func TestKeyManager_GetAllJWKS_CacheHit(t *testing.T) {
 	key1, _ := jwkSet1.Key(0)
 	key2, _ := jwkSet2.Key(0)
 
-	if key1.KeyID() != key2.KeyID() {
-		t.Errorf("Key IDs don't match: first=%s, second=%s", key1.KeyID(), key2.KeyID())
+	kid1, _ := key1.KeyID()
+	kid2, _ := key2.KeyID()
+	if kid1 != kid2 {
+		t.Errorf("Key IDs don't match: first=%s, second=%s", kid1, kid2)
 	}
 }
 

@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +25,7 @@ func setupTestJWKS(t *testing.T, keyID string) (*rsa.PrivateKey, string, *httpte
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
-	pubJWK, err := jwk.FromRaw(&privateKey.PublicKey)
+	pubJWK, err := jwk.Import[jwk.Key](&privateKey.PublicKey)
 	require.NoError(t, err)
 
 	err = pubJWK.Set(jwk.KeyIDKey, keyID)
@@ -288,7 +288,7 @@ func TestHydraTokenVerifier_StaticKeySet(t *testing.T) {
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
 
-	pubJWK, err := jwk.FromRaw(&privKey.PublicKey)
+	pubJWK, err := jwk.Import[jwk.Key](&privKey.PublicKey)
 	require.NoError(t, err)
 	_ = pubJWK.Set(jwk.KeyIDKey, kid)
 
