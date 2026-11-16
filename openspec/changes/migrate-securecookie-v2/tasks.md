@@ -26,8 +26,8 @@
 ## 5. Documentation and rollout
 
 - [x] 5.1 Update `README.md` or developer docs with the HTTPS requirement for local development and verify the documented steps work.
-- [ ] 5.2 Open the PR with the breaking-change summary, migration notes, openspec change reference, and verification results.
-- [ ] 5.3 Note in the PR body that whichever of this PR or #82 merges second needs a trivial `go.mod`/`go.sum` rebase.
+- [x] 5.2 Open the PR with the breaking-change summary, migration notes, openspec change reference, and verification results.
+- [x] 5.3 Note in the PR body that whichever of this PR or #82 merges second needs a trivial `go.mod`/`go.sum` rebase.
 
 ## Implementation Notes
 
