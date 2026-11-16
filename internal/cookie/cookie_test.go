@@ -792,7 +792,6 @@ func TestSetSessionCookieBoundaries(t *testing.T) {
 // TestUnprefixedCookieRejection verifies that unprefixed cookies are not accepted.
 func TestUnprefixedCookieRejection(t *testing.T) {
 	t.Skip("v2 still decodes unprefixed cookies due to same key; v1 cookies rejected by key derivation")
-	return
 	hashKey := securecookie.MustGenerateSeed()
 	cm, err := cookie.NewCookieManager(hashKey)
 	if err != nil {
