@@ -10,7 +10,7 @@ import (
 
 	"github.com/canonical/secure-token-service/internal/auth/openid"
 	"github.com/canonical/secure-token-service/internal/cookie"
-	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 	"golang.org/x/oauth2"
 )
 

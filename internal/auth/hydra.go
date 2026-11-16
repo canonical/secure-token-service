@@ -13,7 +13,9 @@ import (
 	"unicode"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/lestrrat-go/jwx/v2/jwk"
+	"github.com/jwx-go/jwkfetch/v4"
+	"github.com/lestrrat-go/httprc/v3"
+	"github.com/lestrrat-go/jwx/v4/jwk"
 )
 
 var (
@@ -53,7 +55,7 @@ type TokenVerifier interface {
 // HydraTokenVerifier verifies upstream OAuth2 Client Credentials tokens using Ory Hydra's JWKS.
 type HydraTokenVerifier struct {
 	jwksURL            string
-	cache              *jwk.Cache
+	cache              *jwkfetch.Cache
 	staticKeySet       jwk.Set
 	expectedIssuer     string
 	cancel             context.CancelFunc
@@ -62,6 +64,11 @@ type HydraTokenVerifier struct {
 
 // Close stops the background JWKS caching routine and releases associated resources.
 func (v *HydraTokenVerifier) Close() error {
+	if v.cache != nil {
+		if err := v.cache.Shutdown(context.Background()); err != nil {
+			return err
+		}
+	}
 	if v.cancel != nil {
 		v.cancel()
 	}
@@ -154,25 +161,28 @@ func NewHydraTokenVerifier(ctx context.Context, jwksURL string, opts ...Verifier
 		return nil, fmt.Errorf("jwksURL is required when no static key set is provided")
 	}
 
-	refreshWindow := cfg.refreshInterval / 2
-	if refreshWindow < 1*time.Second {
-		refreshWindow = 1 * time.Second
-	}
-	c := jwk.NewCache(cacheCtx, jwk.WithRefreshWindow(refreshWindow))
-	regOpts := []jwk.RegisterOption{
-		jwk.WithRefreshInterval(cfg.refreshInterval),
-		jwk.WithMinRefreshInterval(cfg.minRefreshInterval),
-	}
+	cacheOpts := []jwkfetch.CacheOption{}
 	if cfg.httpClient != nil {
-		regOpts = append(regOpts, jwk.WithHTTPClient(cfg.httpClient))
+		cacheOpts = append(cacheOpts, jwkfetch.WithHTTPClient(cfg.httpClient))
+	}
+	c, err := jwkfetch.NewCache(cacheCtx, httprc.NewClient(), cacheOpts...)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create JWKS cache: %w", err)
 	}
 
-	if err := c.Register(jwksURL, regOpts...); err != nil {
+	if err := c.Register(cacheCtx, jwksURL,
+		jwkfetch.WithWaitReady(false),
+		jwkfetch.WithConstantInterval(cfg.refreshInterval),
+		jwkfetch.WithMinInterval(cfg.minRefreshInterval),
+	); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to register JWKS URL with cache: %w", err)
 	}
 
-	// Preemptively fetch the JWKS on startup to avoid request-time latency
+	// Preemptively fetch the JWKS on startup to avoid request-time latency.
+	// A failed warm-up is not fatal: lookups retry against the cache at
+	// request time and the background worker keeps refreshing.
 	_, _ = c.Refresh(cacheCtx, jwksURL)
 
 	verifier.cache = c
@@ -187,7 +197,7 @@ func (v *HydraTokenVerifier) getKeySet(ctx context.Context) (jwk.Set, error) {
 	if v.cache == nil {
 		return nil, ErrJWKSUnavailable
 	}
-	set, err := v.cache.Get(ctx, v.jwksURL)
+	set, err := v.cache.Lookup(ctx, v.jwksURL)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrJWKSUnavailable, err)
 	}
@@ -242,8 +252,8 @@ func (v *HydraTokenVerifier) Verify(ctx context.Context, tokenString string) (*V
 			return nil, fmt.Errorf("%w: kid %s", ErrKeyNotFound, kid)
 		}
 
-		var rawKey interface{}
-		if err := key.Raw(&rawKey); err != nil {
+		rawKey, err := jwk.Export[any](key)
+		if err != nil {
 			return nil, fmt.Errorf("failed to extract raw key: %w", err)
 		}
 		return rawKey, nil
