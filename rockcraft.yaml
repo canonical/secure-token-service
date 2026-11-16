@@ -1,7 +1,7 @@
 name: secure-token-service
 base: bare
 build-base: ubuntu@24.04
-version: 1.0.0
+version: 1.0.1
 summary: Canonical Identity Platform Secure Token Service
 description: >
   This is the Canonical Identity Platform Secure Token Service used for handling
