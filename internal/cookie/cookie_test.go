@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/canonical/secure-token-service/internal/cookie"
-	"github.com/chmike/securecookie"
+	securecookie "github.com/chmike/securecookie/v2"
 )
 
 // testMaxAge is a session cookie lifetime in seconds long enough not to expire during tests.
@@ -80,7 +80,7 @@ func TestNewCookieManager_KeyValidation(t *testing.T) {
 }
 
 func TestCookieManager_EncodeDecode(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
+	hashKey := securecookie.MustGenerateSeed()
 	cm, err := cookie.NewCookieManager(hashKey)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
@@ -118,7 +118,7 @@ func TestCookieManager_EncodeDecode(t *testing.T) {
 }
 
 func TestCookieManager_DecodeInvalid(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
+	hashKey := securecookie.MustGenerateSeed()
 	cm, err := cookie.NewCookieManager(hashKey)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
@@ -144,13 +144,13 @@ func TestCookieManager_DecodeInvalid(t *testing.T) {
 }
 
 func TestCookieManager_WrongKey(t *testing.T) {
-	hashKey1 := securecookie.MustGenerateRandomKey()
+	hashKey1 := securecookie.MustGenerateSeed()
 	cm1, err := cookie.NewCookieManager(hashKey1)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
 	}
 
-	hashKey2 := securecookie.MustGenerateRandomKey()
+	hashKey2 := securecookie.MustGenerateSeed()
 	cm2, err := cookie.NewCookieManager(hashKey2)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
@@ -168,7 +168,7 @@ func TestCookieManager_WrongKey(t *testing.T) {
 }
 
 func TestCookieManager_DecodeMaxAge(t *testing.T) {
-	cm, err := cookie.NewCookieManager(securecookie.MustGenerateRandomKey())
+	cm, err := cookie.NewCookieManager(securecookie.MustGenerateSeed())
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestCookieManager_DecodeMaxAge(t *testing.T) {
 }
 
 func TestCookieManager_OIDCState(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
+	hashKey := securecookie.MustGenerateSeed()
 	cm, err := cookie.NewCookieManager(hashKey)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
@@ -223,13 +223,13 @@ func TestCookieManager_OIDCState(t *testing.T) {
 			// Extract oauth_state cookie from response
 			var stateCookie *http.Cookie
 			for _, c := range w.Result().Cookies() {
-				if c.Name == "oauth_state" {
+				if c.Name == "__Host-oauth_state" {
 					stateCookie = c
 					break
 				}
 			}
 			if stateCookie == nil {
-				t.Fatal("oauth_state cookie not found in response")
+				t.Fatal("__Host-oauth_state cookie not found in response")
 			}
 
 			// GetOIDCState with valid cookie
@@ -262,7 +262,7 @@ func TestCookieManager_OIDCState(t *testing.T) {
 }
 
 func TestCookieManager_GetOIDCState_NoCookie(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
+	hashKey := securecookie.MustGenerateSeed()
 	cm, err := cookie.NewCookieManager(hashKey)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
@@ -277,7 +277,7 @@ func TestCookieManager_GetOIDCState_NoCookie(t *testing.T) {
 }
 
 func TestCookieManager_OIDCNonce(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
+	hashKey := securecookie.MustGenerateSeed()
 	cm, err := cookie.NewCookieManager(hashKey)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
@@ -306,13 +306,13 @@ func TestCookieManager_OIDCNonce(t *testing.T) {
 			// Extract oauth_nonce cookie
 			var nonceCookie *http.Cookie
 			for _, c := range w.Result().Cookies() {
-				if c.Name == "oauth_nonce" {
+				if c.Name == "__Host-oauth_nonce" {
 					nonceCookie = c
 					break
 				}
 			}
 			if nonceCookie == nil {
-				t.Fatal("oauth_nonce cookie not found")
+				t.Fatal("__Host-oauth_nonce cookie not found")
 			}
 
 			// GetOIDCNonce with valid cookie
@@ -342,7 +342,7 @@ func TestCookieManager_OIDCNonce(t *testing.T) {
 }
 
 func TestCookieManager_GetOIDCNonce_NoCookie(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
+	hashKey := securecookie.MustGenerateSeed()
 	cm, err := cookie.NewCookieManager(hashKey)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
@@ -357,7 +357,7 @@ func TestCookieManager_GetOIDCNonce_NoCookie(t *testing.T) {
 }
 
 func TestCookieManager_SecureFlag(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
+	hashKey := securecookie.MustGenerateSeed()
 	cm, err := cookie.NewCookieManager(hashKey)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
@@ -366,23 +366,10 @@ func TestCookieManager_SecureFlag(t *testing.T) {
 	tests := []struct {
 		name           string
 		forwardedProto string
-		expectSecure   bool
 	}{
-		{
-			name:           "HTTP request (no forwarded proto)",
-			forwardedProto: "",
-			expectSecure:   false,
-		},
-		{
-			name:           "HTTPS via X-Forwarded-Proto",
-			forwardedProto: "https",
-			expectSecure:   true,
-		},
-		{
-			name:           "HTTP via X-Forwarded-Proto",
-			forwardedProto: "http",
-			expectSecure:   false,
-		},
+		{name: "HTTP request (no forwarded proto)", forwardedProto: ""},
+		{name: "HTTPS via X-Forwarded-Proto", forwardedProto: "https"},
+		{name: "HTTP via X-Forwarded-Proto", forwardedProto: "http"},
 	}
 
 	for _, tc := range tests {
@@ -403,15 +390,16 @@ func TestCookieManager_SecureFlag(t *testing.T) {
 				t.Fatal("No cookies set")
 			}
 
-			if cookies[0].Secure != tc.expectSecure {
-				t.Errorf("Secure flag: got %v, want %v", cookies[0].Secure, tc.expectSecure)
+			// securecookie v2 always sets the Secure flag as part of the __Host- contract.
+			if !cookies[0].Secure {
+				t.Error("Secure flag: got false, want true")
 			}
 		})
 	}
 }
 
 func TestCookieManager_SetSessionCookie(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
+	hashKey := securecookie.MustGenerateSeed()
 	cm, err := cookie.NewCookieManager(hashKey)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
@@ -435,8 +423,8 @@ func TestCookieManager_SetSessionCookie(t *testing.T) {
 	}
 
 	c := cookies[0]
-	if c.Name != "session_id" {
-		t.Errorf("cookie name: got %q, want session_id", c.Name)
+	if c.Name != "__Host-session_id" {
+		t.Errorf("cookie name: got %q, want __Host-session_id", c.Name)
 	}
 	if !c.HttpOnly {
 		t.Errorf("expected HttpOnly to be true")
@@ -448,10 +436,11 @@ func TestCookieManager_SetSessionCookie(t *testing.T) {
 		t.Errorf("cookie path: got %q, want /", c.Path)
 	}
 	if !c.Secure {
-		t.Errorf("expected Secure to be true on TLS request")
+		t.Errorf("expected Secure to be true")
 	}
-	if !c.Expires.Equal(expiresAt) {
-		t.Errorf("cookie expires: got %v, want %v", c.Expires, expiresAt)
+	// securecookie v2 emits Max-Age (seconds until expiresAt) instead of Expires.
+	if want := int(time.Until(expiresAt).Truncate(time.Second).Seconds()); c.MaxAge != want {
+		t.Errorf("cookie MaxAge: got %d, want %d", c.MaxAge, want)
 	}
 
 	// Verify the session ID decodes properly
@@ -465,7 +454,7 @@ func TestCookieManager_SetSessionCookie(t *testing.T) {
 }
 
 func TestCookieManager_ClearSessionCookie(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
+	hashKey := securecookie.MustGenerateSeed()
 	cm, err := cookie.NewCookieManager(hashKey)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
@@ -483,8 +472,8 @@ func TestCookieManager_ClearSessionCookie(t *testing.T) {
 	}
 
 	c := cookies[0]
-	if c.Name != "session_id" {
-		t.Errorf("cookie name: got %q, want session_id", c.Name)
+	if c.Name != "__Host-session_id" {
+		t.Errorf("cookie name: got %q, want __Host-session_id", c.Name)
 	}
 	if c.Value != "" {
 		t.Errorf("expected empty value on cleared cookie, got %q", c.Value)
@@ -509,49 +498,26 @@ func TestCookieManager_ClearSessionCookie(t *testing.T) {
 	}
 }
 
-func TestCookieManager_DynamicSecureEvaluation(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
+func TestCookieManager_AlwaysSecureEvaluation(t *testing.T) {
+	hashKey := securecookie.MustGenerateSeed()
 	cm, err := cookie.NewCookieManager(hashKey)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
 	}
 
+	// securecookie v2 always sets the Secure flag regardless of request transport.
+	const expectSecure = true
+
 	tests := []struct {
-		name         string
-		tls          bool
-		headerProto  string
-		expectSecure bool
+		name        string
+		tls         bool
+		headerProto string
 	}{
-		{
-			name:         "plain HTTP without header",
-			tls:          false,
-			headerProto:  "",
-			expectSecure: false,
-		},
-		{
-			name:         "direct TLS",
-			tls:          true,
-			headerProto:  "",
-			expectSecure: true,
-		},
-		{
-			name:         "X-Forwarded-Proto https",
-			tls:          false,
-			headerProto:  "https",
-			expectSecure: true,
-		},
-		{
-			name:         "X-Forwarded-Proto HTTPS (case-insensitive)",
-			tls:          false,
-			headerProto:  "HTTPS",
-			expectSecure: true,
-		},
-		{
-			name:         "X-Forwarded-Proto http",
-			tls:          false,
-			headerProto:  "http",
-			expectSecure: false,
-		},
+		{name: "plain HTTP without header", tls: false, headerProto: ""},
+		{name: "direct TLS", tls: true, headerProto: ""},
+		{name: "X-Forwarded-Proto https", tls: false, headerProto: "https"},
+		{name: "X-Forwarded-Proto HTTPS (case-insensitive)", tls: false, headerProto: "HTTPS"},
+		{name: "X-Forwarded-Proto http", tls: false, headerProto: "http"},
 	}
 
 	for _, tc := range tests {
@@ -574,8 +540,8 @@ func TestCookieManager_DynamicSecureEvaluation(t *testing.T) {
 			if len(cookies) == 0 {
 				t.Fatal("no cookies set")
 			}
-			if cookies[0].Secure != tc.expectSecure {
-				t.Errorf("SetSessionCookie Secure: got %v, want %v", cookies[0].Secure, tc.expectSecure)
+			if cookies[0].Secure != expectSecure {
+				t.Errorf("SetSessionCookie Secure: got %v, want %v", cookies[0].Secure, expectSecure)
 			}
 
 			// Test ClearSessionCookie
@@ -585,8 +551,8 @@ func TestCookieManager_DynamicSecureEvaluation(t *testing.T) {
 			if len(clearCookies) == 0 {
 				t.Fatal("no cookies set on clear")
 			}
-			if clearCookies[0].Secure != tc.expectSecure {
-				t.Errorf("ClearSessionCookie Secure: got %v, want %v", clearCookies[0].Secure, tc.expectSecure)
+			if clearCookies[0].Secure != expectSecure {
+				t.Errorf("ClearSessionCookie Secure: got %v, want %v", clearCookies[0].Secure, expectSecure)
 			}
 
 			// Test SetAuthState
@@ -599,15 +565,15 @@ func TestCookieManager_DynamicSecureEvaluation(t *testing.T) {
 			if len(stateCookies) == 0 {
 				t.Fatal("no state cookies set")
 			}
-			if stateCookies[0].Secure != tc.expectSecure {
-				t.Errorf("SetAuthState Secure: got %v, want %v", stateCookies[0].Secure, tc.expectSecure)
+			if stateCookies[0].Secure != expectSecure {
+				t.Errorf("SetAuthState Secure: got %v, want %v", stateCookies[0].Secure, expectSecure)
 			}
 		})
 	}
 }
 
 func TestCookieManager_AuthState(t *testing.T) {
-	hashKey := securecookie.MustGenerateRandomKey()
+	hashKey := securecookie.MustGenerateSeed()
 	cm, err := cookie.NewCookieManager(hashKey)
 	if err != nil {
 		t.Fatalf("NewCookieManager failed: %v", err)
@@ -672,13 +638,13 @@ func TestCookieManager_AuthState(t *testing.T) {
 			// Find oauth_state cookie
 			var stateCookie *http.Cookie
 			for _, c := range w.Result().Cookies() {
-				if c.Name == "oauth_state" {
+				if c.Name == "__Host-oauth_state" {
 					stateCookie = c
 					break
 				}
 			}
 			if stateCookie == nil {
-				t.Fatal("oauth_state cookie not found in response")
+				t.Fatal("__Host-oauth_state cookie not found in response")
 			}
 
 			// GetAuthState

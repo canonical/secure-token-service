@@ -1374,7 +1374,7 @@ func TestHandleLogout(t *testing.T) {
 	// Create test request with a cookie
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
 	req.AddCookie(&http.Cookie{
-		Name:  "session_id",
+		Name:  cookie.SessionCookieName,
 		Value: "test-session-value",
 	})
 	w := httptest.NewRecorder()

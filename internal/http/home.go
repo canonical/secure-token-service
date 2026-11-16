@@ -10,6 +10,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/canonical/secure-token-service/internal/cookie"
 	"github.com/canonical/secure-token-service/internal/session"
 	"go.uber.org/zap"
 )
@@ -17,16 +18,16 @@ import (
 // handleHome displays user session information on the homepage
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	// Try to get session cookie
-	cookie, err := r.Cookie("session_id")
+	sessCookie, err := r.Cookie(cookie.SessionCookieName)
 
 	// If no session cookie, show login page
-	if err != nil || cookie.Value == "" {
+	if err != nil || sessCookie.Value == "" {
 		renderUnauthenticatedHome(w)
 		return
 	}
 
 	// Decode session from cookie
-	sessionID, err := s.cookieManager.Decode("session_id", cookie.Value, s.sessionMaxAge())
+	sessionID, err := s.cookieManager.Decode("session_id", sessCookie.Value, s.sessionMaxAge())
 	if err != nil {
 		s.logger(r.Context()).Error("failed to decode session cookie", zap.Error(err))
 		renderUnauthenticatedHome(w)
