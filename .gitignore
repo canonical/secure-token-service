@@ -64,3 +64,11 @@ vendor/
 .archify/**/visual-check/*.json
 .archify/**/visual-check/*light*.png
 .archify/**/visual-check/*1440x900*.png
+
+# Python / harness2 caches, local secrets, and sweep outputs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.harness2/.env
+.harness2/runs/
+

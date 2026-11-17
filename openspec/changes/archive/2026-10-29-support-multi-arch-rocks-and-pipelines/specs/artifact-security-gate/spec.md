@@ -1,9 +1,12 @@
 # Spec Delta
 
+## Purpose
+Extends the Secure Token Service artifact security gate to verify three-architecture static Go binary compilation (`linux/amd64`, `linux/arm64`, `linux/riscv64`) before container builds and preserve multi-architecture (`amd64`, `arm64`) OCI manifest lists during Trivy-gated candidate promotion.
+
 ## MODIFIED Requirements
 
 ### Requirement: Pull request vulnerability pre-check
-The test verification workflow SHALL execute static vulnerability analysis on Go dependencies and build and verify the ELF machine architecture of the Go binary for `linux/amd64`, `linux/arm64`, and `linux/riscv64` before initiating container image builds. If any high or critical vulnerability with a reachable execution path is detected, or if any of the three binary architectures fails to build or match its target ELF architecture (`x86-64`, `aarch64`, `RISC-V`), the workflow SHALL terminate with an error and skip container image construction.
+The test verification workflow SHALL run static Go dependency vulnerability analysis and compile and verify static ELF binaries for `linux/amd64` (`x86-64`), `linux/arm64` (`aarch64`), and `linux/riscv64` (`RISC-V`) before starting container image builds. If any reachable vulnerability is detected or any target binary fails compilation or ELF verification, the workflow SHALL fail and skip container rock builds.
 
 #### Scenario: Clean dependencies in pull request
 - **WHEN** a pull request has no known vulnerable Go dependencies and builds and verifies ELF binaries for `linux/amd64` (`x86-64`), `linux/arm64` (`aarch64`), and `linux/riscv64` (`RISC-V`)
@@ -16,7 +19,7 @@ The test verification workflow SHALL execute static vulnerability analysis on Go
 - **THEN** the container rock build matrix jobs (`amd64` and `arm64`) do not run
 
 ### Requirement: Candidate artifact scanning and promotion gate
-The release pipeline SHALL publish multi-architecture container artifacts (`amd64` and `arm64`) under temporary candidate tags (`<version>-candidate`, `<version>-candidate-amd64`, and `<version>-candidate-arm64`) and run security scans against the candidate image before publishing to `stable`. Promotion to `stable` and `<version>` and graduation of the GitHub Release to a non-prerelease state SHALL occur ONLY when the security scan completes with zero blocking vulnerabilities. Promotion SHALL copy both `amd64` and `arm64` manifests in the OCI manifest list (`skopeo copy --all`, tracked upstream in [`canonical/identity-team#156`](https://github.com/canonical/identity-team/pull/156)).
+The release pipeline SHALL publish `amd64` and `arm64` container artifacts under `<version>-candidate` tags and complete vulnerability scans before promoting to `stable`. Promotion to `stable` and `<version>` and GitHub Release graduation SHALL occur ONLY when the candidate scan reports zero blocking vulnerabilities, copying both `amd64` and `arm64` manifests in the OCI manifest list via `skopeo copy --all`.
 
 #### Scenario: Clean candidate promoted to stable
 - **WHEN** the candidate container image scan completes with zero blocking vulnerabilities

@@ -1,0 +1,4 @@
+# Shared OpenSpec harness toolkit (canonical/identity-team, tools/openspec-harness).
+# Pinned by identity-team release tag (cut by the standard release-please
+# workflow); bump intentionally.
+openspec-harness @ git+https://github.com/canonical/identity-team.git@v1.19.0#subdirectory=tools/openspec-harness

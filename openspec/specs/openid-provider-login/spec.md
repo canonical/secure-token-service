@@ -3,7 +3,7 @@
 ## Purpose
 Enables users and client applications to initiate authentication with either the standard OIDC provider or the Ubuntu One OpenID 2.0 provider via a dedicated query parameter on the `/auth/login` endpoint, and handles the subsequent callback and signature verification via a dedicated `/auth/openid/callback` endpoint.
 
-For architectural diagrams and component details, see [Architecture Design: Ubuntu One OpenID & Standardized Cookie Generation](../../design.md#end-to-end-architecture).
+For architectural diagrams and component details, see [Architecture Design: Ubuntu One OpenID & Standardized Cookie Generation](../../changes/archive/2026-10-29-support-ubuntu-one-openid/design.md#end-to-end-architecture).
 
 ## Requirements
 
