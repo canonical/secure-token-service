@@ -1,0 +1,62 @@
+name: promote-image
+run-name: Promote candidate image for ${{ inputs.tag }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose candidate image gets promoted (e.g. v1.0.1)"
+        required: true
+        type: string
+      mark-stable:
+        description: "Also tag the image as stable"
+        required: false
+        type: boolean
+        default: false
+      mark-latest:
+        description: "Also mark the GitHub release as latest"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  packages: write
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Rockcraft for Skopeo
+        run: sudo snap install --classic --channel latest/stable rockcraft
+
+      - name: Promote image tags via Skopeo
+        run: |
+          source_image="docker://ghcr.io/${{ github.repository }}:${{ inputs.tag }}-candidate"
+          target_tags=("${{ inputs.tag }}")
+          if [ "${{ inputs.mark-stable }}" = "true" ]; then
+            target_tags+=("stable")
+          fi
+
+          for tag in "${target_tags[@]}"; do
+            echo "Promoting to ghcr.io/${{ github.repository }}:${tag}..."
+            sudo rockcraft.skopeo --insecure-policy copy --all \
+              --src-creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+              --dest-creds "${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}" \
+              "$source_image" \
+              "docker://ghcr.io/${{ github.repository }}:${tag}"
+          done
+
+      - name: Graduate GitHub Release from pre-release to stable
+        run: |
+          if gh release view "${{ inputs.tag }}" >/dev/null 2>&1; then
+            cmd=("gh" "release" "edit" "${{ inputs.tag }}" "--prerelease=false")
+            if [ "${{ inputs.mark-latest }}" = "true" ]; then
+              cmd+=("--latest")
+            fi
+            "${cmd[@]}"
+          else
+            echo "Notice: GitHub release ${{ inputs.tag }} not found; skipping release graduation."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
