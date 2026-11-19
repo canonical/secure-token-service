@@ -383,6 +383,8 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 | `JWKS_CACHE_TTL` | `600` | Preemptive JWKS cache refresh TTL in seconds |
 
 
+> **Note — cookies require HTTPS**: All cookies issued by the service use the `__Host-` name prefix and always carry the `Secure` attribute (enforced by `github.com/chmike/securecookie/v2`). Browsers therefore only accept them over HTTPS. For local development, put the service behind a TLS-terminating proxy or use a browser localhost exception; plain-HTTP cookie-based login does not work.
+
 ### Environment File Management
 
 This project uses `.env` files for configuration:

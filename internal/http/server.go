@@ -644,10 +644,10 @@ func (s *Server) handleOpenIDCallback(w http.ResponseWriter, r *http.Request) {
 
 // handleLogout handles user logout.
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie("session_id")
+	sessCookie, err := r.Cookie(cookie.SessionCookieName)
 	if err == nil {
 		// Attempt to decode to get session ID for deletion from store
-		if sessionID, err := s.cookieManager.Decode("session_id", cookie.Value, s.sessionMaxAge()); err == nil {
+		if sessionID, err := s.cookieManager.Decode("session_id", sessCookie.Value, s.sessionMaxAge()); err == nil {
 			if err := s.sessionStore.Delete(r.Context(), sessionID); err != nil {
 				s.logger(r.Context()).Error("failed to delete session",
 					zap.String("session_id", sessionID),
