@@ -107,17 +107,19 @@ func (s *Server) ExchangeSession(ctx context.Context, req *stsv1.ExchangeRequest
 		return nil, status.Error(codes.NotFound, "session not found")
 	}
 
-	// Merge session claims while ensuring primary identity is preserved
+	// Copy session claims, normalizing email: trimmed when a non-empty string,
+	// otherwise dropped so an unverified or malformed email is never re-exposed.
 	claims := make(map[string]interface{})
 	for k, v := range sess.Claims {
+		if k == "email" {
+			if emailVal, ok := v.(string); ok {
+				if trimmed := strings.TrimSpace(emailVal); trimmed != "" {
+					claims[k] = trimmed
+				}
+			}
+			continue
+		}
 		claims[k] = v
-	}
-	if strings.Contains(sess.UserID, "@") {
-		claims["email"] = sess.UserID
-	} else if emailVal, ok := sess.Claims["email"].(string); ok && emailVal != "" {
-		claims["email"] = emailVal
-	} else {
-		claims["email"] = sess.UserID
 	}
 
 	// Mint internal JWT

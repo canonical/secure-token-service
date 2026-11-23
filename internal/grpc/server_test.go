@@ -126,7 +126,7 @@ func TestExchangeSession_WithOpenIDClaims(t *testing.T) {
 				"nickname":     "testuser",
 				"name":         "Test User",
 				"idp_provider": "ubuntuone",
-				"email":        "ignored-override@example.com", // should be overridden by UserID
+				"email":        "user@example.com",
 			},
 		}, nil)
 
@@ -159,6 +159,111 @@ func TestExchangeSession_WithOpenIDClaims(t *testing.T) {
 
 	if resp.ExpiresIn != 3600 {
 		t.Errorf("Expected expiry 3600, got: %d", resp.ExpiresIn)
+	}
+}
+
+func TestExchangeSession_WithOIDCProfileAndTenantClaims(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx := context.Background()
+	cookieManager := NewMockCookieManager(ctrl)
+	sessionStore := NewMockSessionStore(ctrl)
+	keyManager := NewMockKeyManager(ctrl)
+
+	server := NewServer(sessionStore, keyManager, cookieManager, "test-issuer", "test-audience", 3600, nil)
+
+	cookieManager.EXPECT().
+		Decode("session_id", "oidc-cookie", gomock.Any()).
+		Return("session-oidc-123", nil)
+
+	sessionStore.EXPECT().
+		Get(ctx, "session-oidc-123").
+		Return(&session.Session{
+			SessionID: "session-oidc-123",
+			UserID:    "alice@canonical.com",
+			Provider:  "oidc",
+			Claims: map[string]interface{}{
+				"sub":          "oidc-sub-1",
+				"email":        "alice@canonical.com",
+				"name":         "Alice Smith",
+				"given_name":   "Alice",
+				"tenant":       "canonical",
+				"idp_provider": "oidc",
+			},
+		}, nil)
+
+	expectedClaims := map[string]interface{}{
+		"sub":          "oidc-sub-1",
+		"email":        "alice@canonical.com",
+		"name":         "Alice Smith",
+		"given_name":   "Alice",
+		"tenant":       "canonical",
+		"idp_provider": "oidc",
+	}
+
+	keyManager.EXPECT().
+		MintToken("alice@canonical.com", "test-issuer", "test-audience", 3600, expectedClaims).
+		Return("mock-jwt-token-oidc", nil)
+
+	resp, err := server.ExchangeSession(ctx, &stsv1.ExchangeRequest{
+		SessionCookie: "oidc-cookie",
+	})
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if resp.AccessToken != "mock-jwt-token-oidc" {
+		t.Errorf("Expected token 'mock-jwt-token-oidc', got: %s", resp.AccessToken)
+	}
+}
+
+func TestExchangeSession_OmitsEmailWhenNoEmailPresent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	ctx := context.Background()
+	cookieManager := NewMockCookieManager(ctrl)
+	sessionStore := NewMockSessionStore(ctrl)
+	keyManager := NewMockKeyManager(ctrl)
+
+	server := NewServer(sessionStore, keyManager, cookieManager, "test-issuer", "test-audience", 3600, nil)
+
+	cookieManager.EXPECT().
+		Decode("session_id", "unverified-cookie", gomock.Any()).
+		Return("session-unverified-123", nil)
+
+	sessionStore.EXPECT().
+		Get(ctx, "session-unverified-123").
+		Return(&session.Session{
+			SessionID: "session-unverified-123",
+			UserID:    "unverified@upn.example.com",
+			Provider:  "oidc",
+			Claims: map[string]interface{}{
+				"email":        "   ",
+				"sub":          "oidc-sub-999",
+				"name":         "No Email User",
+				"idp_provider": "oidc",
+			},
+		}, nil)
+
+	expectedClaims := map[string]interface{}{
+		"sub":          "oidc-sub-999",
+		"name":         "No Email User",
+		"idp_provider": "oidc",
+	}
+
+	keyManager.EXPECT().
+		MintToken("unverified@upn.example.com", "test-issuer", "test-audience", 3600, expectedClaims).
+		Return("mock-jwt-token-no-email", nil)
+
+	resp, err := server.ExchangeSession(ctx, &stsv1.ExchangeRequest{
+		SessionCookie: "unverified-cookie",
+	})
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if resp.AccessToken != "mock-jwt-token-no-email" {
+		t.Errorf("Expected token 'mock-jwt-token-no-email', got: %s", resp.AccessToken)
 	}
 }
 

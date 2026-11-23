@@ -89,6 +89,7 @@ type Claims struct {
 	Email     string                 `json:"email,omitempty"`
 	Nickname  string                 `json:"nickname,omitempty"`
 	FullName  string                 `json:"name,omitempty"`
+	GivenName string                 `json:"given_name,omitempty"`
 	ClaimedID string                 `json:"claimed_id,omitempty"`
 	Raw       map[string]interface{} `json:"raw,omitempty"`
 }
@@ -123,6 +124,9 @@ func (c *Claims) NormalizedClaims() map[string]interface{} {
 	}
 	if c.FullName != "" {
 		m["name"] = c.FullName
+	}
+	if c.GivenName != "" {
+		m["given_name"] = c.GivenName
 	}
 	if c.ClaimedID != "" {
 		m["claimed_id"] = c.ClaimedID
@@ -231,6 +235,14 @@ func (c *Client) BuildAuthURL(returnToURL, stateToken string) (string, error) {
 // VerifyCallback verifies an OpenID 2.0 callback response via direct HTTP POST (check_authentication).
 func (c *Client) VerifyCallback(ctx context.Context, r *http.Request, expectedReturnTo string) (*Claims, error) {
 	q := r.URL.Query()
+	// Reject duplicate or empty openid.* parameters (HTTP Parameter Pollution).
+	// q.Get reads v[0], whereas check_authentication forwards all values and some OPs
+	// (e.g. Ubuntu SSO / Django QueryDict) evaluate v[-1].
+	for k, v := range q {
+		if strings.HasPrefix(k, "openid.") && len(v) != 1 {
+			return nil, fmt.Errorf("openid: duplicate or empty parameter %q", k)
+		}
+	}
 
 	mode := q.Get("openid.mode")
 	if mode == "" {
@@ -262,6 +274,23 @@ func (c *Client) VerifyCallback(ctx context.Context, r *http.Request, expectedRe
 			if skew < -5*time.Minute || skew > 5*time.Minute {
 				return nil, fmt.Errorf("openid response_nonce timestamp out of acceptable skew: %v", t)
 			}
+		}
+	}
+
+	// Validate openid.signed covers required core assertion fields (OpenID 2.0 §10.1).
+	// Note: "signed" itself is not required inside openid.signed per §10.1.
+	signedFields, ok := parseSignedFields(q)
+	if !ok {
+		return nil, errors.New("openid: missing openid.signed in callback")
+	}
+	for _, reqField := range []string{"return_to", "response_nonce"} {
+		if !signedFields[reqField] {
+			return nil, fmt.Errorf("openid: required field %q is not covered by openid.signed", reqField)
+		}
+	}
+	for _, condField := range []string{"op_endpoint", "assoc_handle", "claimed_id", "identity"} {
+		if q.Get("openid."+condField) != "" && !signedFields[condField] {
+			return nil, fmt.Errorf("openid: field %q is not covered by openid.signed", condField)
 		}
 	}
 
@@ -327,7 +356,9 @@ func IsValidResponse(body string) bool {
 	return false
 }
 
-// ExtractClaims extracts Attribute Exchange and identity attributes from query parameters.
+// ExtractClaims extracts Attribute Exchange and identity attributes strictly from
+// fields covered by `openid.signed` in a verified OpenID 2.0 assertion.
+// Unsigned parameters (including non-`openid.*` query parameters) are ignored.
 func ExtractClaims(q url.Values) *Claims {
 	claims := &Claims{
 		Raw: make(map[string]interface{}),
@@ -339,21 +370,48 @@ func ExtractClaims(q url.Values) *Claims {
 		}
 	}
 
-	// 1. Claimed ID / Identity
-	if val := q.Get("openid.claimed_id"); val != "" {
+	// Build the set of fields covered by `openid.signed` (OpenID 2.0 §10.1).
+	// Fail closed when `openid.signed` is missing or duplicated.
+	signedFields, ok := parseSignedFields(q)
+	if !ok {
+		return claims
+	}
+
+	// signedGet returns the value for an `openid.*` parameter only when it has a
+	// single value (preventing HPP) and its field name (without the `openid.` prefix)
+	// is present in `openid.signed`.
+	signedGet := func(key string) string {
+		if !strings.HasPrefix(key, "openid.") {
+			return ""
+		}
+		if !signedFields[strings.TrimPrefix(key, "openid.")] {
+			return ""
+		}
+		vals := q[key]
+		if len(vals) != 1 {
+			return ""
+		}
+		return vals[0]
+	}
+
+	// 1. Claimed ID / Identity (must be signed)
+	if val := signedGet("openid.claimed_id"); val != "" {
 		claims.ClaimedID = val
-	} else if val := q.Get("openid.identity"); val != "" {
+	} else if val := signedGet("openid.identity"); val != "" {
 		claims.ClaimedID = val
 	}
 
-	// 2. Discover AX and SREG alias prefixes
+	// 2. Discover AX and SREG alias prefixes from signed namespace declarations
 	axPrefixes := []string{"ax", "ext1"}
 	sregPrefixes := []string{"sreg"}
 
-	for k, v := range q {
-		if strings.HasPrefix(k, "openid.ns.") && len(v) > 0 {
+	for k := range q {
+		if strings.HasPrefix(k, "openid.ns.") {
+			nsVal := signedGet(k)
+			if nsVal == "" {
+				continue
+			}
 			alias := strings.TrimPrefix(k, "openid.ns.")
-			nsVal := v[0]
 			if nsVal == AXNS || strings.HasPrefix(nsVal, "http://openid.net/srv/ax/") {
 				axPrefixes = append(axPrefixes, alias)
 			}
@@ -363,50 +421,32 @@ func ExtractClaims(q url.Values) *Claims {
 		}
 	}
 
-	// Helper to find attribute value by alias or schema URI
+	// Helper to find a signed attribute value by alias or schema URI
 	findAttr := func(attrName string, schemaURIs ...string) string {
 		// 1. Check SREG prefixes: openid.<sregPrefix>.<attrName>
 		for _, prefix := range sregPrefixes {
-			if val := q.Get(fmt.Sprintf("openid.%s.%s", prefix, attrName)); val != "" {
+			if val := signedGet(fmt.Sprintf("openid.%s.%s", prefix, attrName)); val != "" {
 				return val
 			}
 		}
 
 		// 2. Check AX prefixes
 		for _, prefix := range axPrefixes {
-			// Direct alias: openid.<prefix>.value.<attrName>
-			if val := q.Get(fmt.Sprintf("openid.%s.value.%s", prefix, attrName)); val != "" {
-				return val
-			}
-			// Multi-value indexed alias: openid.<prefix>.value.<attrName>.1
-			if val := q.Get(fmt.Sprintf("openid.%s.value.%s.1", prefix, attrName)); val != "" {
-				return val
-			}
 			// Search by registered type URI: openid.<prefix>.type.<alias> == schemaURI
 			for _, schemaURI := range schemaURIs {
-				for k, v := range q {
-					typePrefix := fmt.Sprintf("openid.%s.type.", prefix)
-					if strings.HasPrefix(k, typePrefix) && len(v) > 0 && v[0] == schemaURI {
+				typePrefix := fmt.Sprintf("openid.%s.type.", prefix)
+				for k := range q {
+					if strings.HasPrefix(k, typePrefix) && signedGet(k) == schemaURI {
 						typeAlias := strings.TrimPrefix(k, typePrefix)
-						if val := q.Get(fmt.Sprintf("openid.%s.value.%s", prefix, typeAlias)); val != "" {
+						if val := signedGet(fmt.Sprintf("openid.%s.value.%s", prefix, typeAlias)); val != "" {
 							return val
 						}
-						if val := q.Get(fmt.Sprintf("openid.%s.value.%s.1", prefix, typeAlias)); val != "" {
+						if val := signedGet(fmt.Sprintf("openid.%s.value.%s.1", prefix, typeAlias)); val != "" {
 							return val
 						}
 					}
 				}
 			}
-		}
-
-		// 3. Fallback direct openid.<attrName>
-		if val := q.Get(fmt.Sprintf("openid.%s", attrName)); val != "" {
-			return val
-		}
-
-		// 4. Fallback direct query parameter
-		if val := q.Get(attrName); val != "" {
-			return val
 		}
 
 		return ""
@@ -434,13 +474,38 @@ func ExtractClaims(q url.Values) *Claims {
 			"http://openid.net/schema/namePerson",
 		)
 	}
+	claims.GivenName = findAttr("first_name",
+		"http://axschema.org/namePerson/first",
+		"http://schema.openid.net/namePerson/first",
+	)
 	if claims.FullName == "" {
-		first := findAttr("first_name", "http://axschema.org/namePerson/first")
-		last := findAttr("last_name", "http://axschema.org/namePerson/last")
-		if first != "" || last != "" {
-			claims.FullName = strings.TrimSpace(first + " " + last)
+		last := findAttr("last_name",
+			"http://axschema.org/namePerson/last",
+			"http://schema.openid.net/namePerson/last",
+		)
+		if claims.GivenName != "" || last != "" {
+			claims.FullName = strings.TrimSpace(claims.GivenName + " " + last)
 		}
 	}
 
 	return claims
+}
+
+// parseSignedFields parses a single-valued `openid.signed` parameter into a lookup set.
+func parseSignedFields(q url.Values) (map[string]bool, bool) {
+	vals, ok := q["openid.signed"]
+	if !ok || len(vals) != 1 {
+		return nil, false
+	}
+	signed := strings.TrimSpace(vals[0])
+	if signed == "" {
+		return nil, false
+	}
+	signedFields := make(map[string]bool)
+	for _, field := range strings.Split(signed, ",") {
+		if f := strings.TrimSpace(field); f != "" {
+			signedFields[f] = true
+		}
+	}
+	return signedFields, len(signedFields) > 0
 }
