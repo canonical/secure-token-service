@@ -433,3 +433,103 @@ func TestNewValkeyClient_WithUsername(t *testing.T) {
 		t.Fatalf("PING failed: %v", err)
 	}
 }
+
+func TestValkeyStore_ListUserSessions_AndRevokeExcept_AndTTL(t *testing.T) {
+	t.Parallel()
+	store, container := setupTestValkey(t)
+	defer func() {
+		if err := container.Terminate(context.Background()); err != nil {
+			t.Logf("Failed to terminate container: %v", err)
+		}
+	}()
+
+	ctx := context.Background()
+	userID := "user-crud@canonical.com"
+	now := time.Now().UTC().Truncate(time.Second)
+
+	// Set a long-TTL session first, then a shorter-TTL session; user_sessions TTL must not shrink.
+	if err := store.Set(ctx, &Session{
+		SessionID: "sess-long",
+		UserID:    userID,
+		Provider:  "oidc",
+		CreatedAt: now.Add(-5 * time.Minute),
+		ExpiresAt: now.Add(time.Minute), // stale stored timestamp
+	}, WithTTL(2*time.Hour)); err != nil {
+		t.Fatalf("Set(sess-long) failed: %v", err)
+	}
+	if err := store.Set(ctx, &Session{
+		SessionID: "sess-short",
+		UserID:    userID,
+		Provider:  "openid",
+		CreatedAt: now.Add(-1 * time.Minute),
+		ExpiresAt: now.Add(time.Minute),
+	}, WithTTL(10*time.Minute)); err != nil {
+		t.Fatalf("Set(sess-short) failed: %v", err)
+	}
+
+	userSetTTL, err := store.client.Do(ctx, store.client.B().Ttl().Key("user_sessions:"+userID).Build()).AsInt64()
+	if err != nil {
+		t.Fatalf("TTL(user_sessions) failed: %v", err)
+	}
+	if userSetTTL < 3600 {
+		t.Fatalf("user_sessions TTL shrank below 3600s: got %d", userSetTTL)
+	}
+
+	// Inject a stale/expired session ID directly into user_sessions:<userID>.
+	if err := store.client.Do(ctx, store.client.B().Sadd().Key("user_sessions:"+userID).Member("sess-expired").Build()).Error(); err != nil {
+		t.Fatalf("SADD stale member failed: %v", err)
+	}
+
+	// ListUserSessions should return both active sessions with TTL-derived ExpiresAt and prune sess-expired.
+	before := time.Now()
+	listed, err := store.ListUserSessions(ctx, userID)
+	if err != nil {
+		t.Fatalf("ListUserSessions failed: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("expected 2 active sessions, got %d", len(listed))
+	}
+	if listed[0].SessionID != "sess-short" || listed[1].SessionID != "sess-long" {
+		t.Fatalf("unexpected order: got [%s, %s]", listed[0].SessionID, listed[1].SessionID)
+	}
+	if delta := listed[1].ExpiresAt.Sub(before); delta < 7000*time.Second {
+		t.Errorf("expected sess-long ExpiresAt derived from ~2h Valkey TTL, got delta=%v", delta)
+	}
+
+	members, err := store.client.Do(ctx, store.client.B().Smembers().Key("user_sessions:"+userID).Build()).AsStrSlice()
+	if err != nil {
+		t.Fatalf("SMEMBERS failed: %v", err)
+	}
+	for _, m := range members {
+		if m == "sess-expired" {
+			t.Fatal("expected sess-expired to be lazily pruned by ListUserSessions")
+		}
+	}
+
+	// Revoke all except sess-long.
+	revoked, err := store.RevokeUserSessionsExcept(ctx, userID, "sess-long")
+	if err != nil {
+		t.Fatalf("RevokeUserSessionsExcept failed: %v", err)
+	}
+	if revoked != 1 {
+		t.Fatalf("expected revoked=1, got %d", revoked)
+	}
+	if _, err := store.Get(ctx, "sess-long"); err != nil {
+		t.Errorf("expected sess-long to remain active, got %v", err)
+	}
+	if _, err := store.Get(ctx, "sess-short"); err == nil {
+		t.Error("expected sess-short to be deleted")
+	}
+
+	// Revoke all remaining.
+	revokedAll, err := store.RevokeUserSessionsExcept(ctx, userID, "")
+	if err != nil {
+		t.Fatalf("RevokeUserSessionsExcept(all) failed: %v", err)
+	}
+	if revokedAll != 1 {
+		t.Fatalf("expected revokedAll=1, got %d", revokedAll)
+	}
+	if _, err := store.Get(ctx, "sess-long"); err == nil {
+		t.Error("expected sess-long to be deleted")
+	}
+}
