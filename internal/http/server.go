@@ -6,9 +6,11 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -67,6 +69,13 @@ func WithSessionExpiry(expiry time.Duration) ServerOption {
 	}
 }
 
+// WithTenantClaim sets the OIDC ID token claim name mapped to the normalized "tenant" claim.
+func WithTenantClaim(claim string) ServerOption {
+	return func(s *Server) {
+		s.tenantClaim = strings.TrimSpace(claim)
+	}
+}
+
 // Server handles HTTP endpoints for OIDC flow, OpenID flow, and JWKS.
 type Server struct {
 	sessionStore    session.Store
@@ -75,13 +84,18 @@ type Server struct {
 	oidcProvider    OIDCProvider
 	openIDProvider  OpenIDProvider
 	defaultProvider string
+	tenantClaim     string
 	sessionExpiry   time.Duration
 	observability   *observability.Observability
 	allowedHosts    []string
+	csrfProtection  *http.CrossOriginProtection
 	server          *http.Server
 }
 
-const defaultAuthProvider = "oidc"
+const (
+	defaultAuthProvider = "oidc"
+	defaultTenantClaim  = "tenant"
+)
 
 // sessionLifetime returns the configured session lifetime, or the default when unset.
 func (s *Server) sessionLifetime() time.Duration {
@@ -108,13 +122,20 @@ func (s *Server) logger(ctx context.Context) *zap.Logger {
 
 // NewServer creates a new HTTP server with optional observability and configuration options.
 func NewServer(store session.Store, km KeyManager, cm AuthCookieManager, provider OIDCProvider, obs *observability.Observability, opts ...ServerOption) *Server {
+	csrf := http.NewCrossOriginProtection()
+	csrf.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeMeJSON(w, http.StatusForbidden, map[string]string{"error": "cross-origin request forbidden"})
+	}))
+
 	s := &Server{
 		sessionStore:    store,
 		keyManager:      km,
 		cookieManager:   cm,
 		oidcProvider:    provider,
 		defaultProvider: defaultAuthProvider,
+		tenantClaim:     defaultTenantClaim,
 		observability:   obs,
+		csrfProtection:  csrf,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -122,21 +143,34 @@ func NewServer(store session.Store, km KeyManager, cm AuthCookieManager, provide
 	return s
 }
 
-// Router creates and returns a chi router with all routes configured.
-// This is useful for testing endpoints.
-func (s *Server) Router() http.Handler {
-	r := chi.NewRouter()
-
+// mountAuthAndJWKSRoutes registers all authentication and JWKS routes on the given router.
+func (s *Server) mountAuthAndJWKSRoutes(r chi.Router) {
 	// Auth endpoints
 	r.Get("/auth/login", s.handleLogin)
 	r.Get("/auth/callback", s.handleCallback)
 	r.Get("/auth/openid/callback", s.handleOpenIDCallback)
-	r.Post("/auth/logout", s.handleLogout)
+	r.Get("/auth/me", s.handleMe)
 	r.Get("/auth/sessions", s.handleSessions)
+
+	// State-changing cookie-authenticated endpoints guarded by stdlib CrossOriginProtection.
+	r.Group(func(r chi.Router) {
+		if s.csrfProtection != nil {
+			r.Use(s.csrfProtection.Handler)
+		}
+		r.Post("/auth/logout", s.handleLogout)
+		r.Delete("/auth/sessions", s.handleRevokeAllSessions)
+		r.Delete("/auth/sessions/{session_id}", s.handleRevokeSession)
+	})
 
 	// JWKS endpoint
 	r.Get("/.well-known/jwks.json", s.handleJWKS)
+}
 
+// Router creates and returns a chi router with all routes configured.
+// This is useful for testing endpoints.
+func (s *Server) Router() http.Handler {
+	r := chi.NewRouter()
+	s.mountAuthAndJWKSRoutes(r)
 	return r
 }
 
@@ -183,15 +217,7 @@ func (s *Server) StartWithMiddleware(port string) error {
 	// Homepage
 	r.Get("/", s.handleHome)
 
-	// Auth endpoints
-	r.Get("/auth/login", s.handleLogin)
-	r.Get("/auth/callback", s.handleCallback)
-	r.Get("/auth/openid/callback", s.handleOpenIDCallback)
-	r.Post("/auth/logout", s.handleLogout)
-	r.Get("/auth/sessions", s.handleSessions)
-
-	// JWKS endpoint
-	r.Get("/.well-known/jwks.json", s.handleJWKS)
+	s.mountAuthAndJWKSRoutes(r)
 
 	s.logger(context.Background()).Info("HTTP server starting with middleware", zap.String("port", port))
 	s.server = &http.Server{
@@ -250,7 +276,7 @@ func (s *Server) isValidReturnTo(returnTo string, reqHost string) bool {
 		if len(returnTo) > 1 && (returnTo[1] == '/' || returnTo[1] == '\\') {
 			return false
 		}
-		return strings.HasPrefix(returnTo, "/") && !strings.HasPrefix(returnTo, "//") && !strings.HasPrefix(returnTo, "/\\")
+		return strings.HasPrefix(returnTo, "/")
 	}
 
 	// If absolute URL with http/https scheme: allowed if host matches reqHost or configured allowed hosts.
@@ -464,27 +490,31 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. Create Session
-	sessionID := uuid.New().String()
-	// Ideally extract sub from idToken for userID
-	var claims struct {
-		Email string `json:"email,omitempty"`
-	}
-
-	err = idToken.Claims(&claims)
-	if err != nil || claims.Email == "" {
+	var rawClaims map[string]interface{}
+	if err := idToken.Claims(&rawClaims); err != nil {
+		s.logger(r.Context()).Error("failed to extract ID token claims", zap.Error(err))
 		http.Error(w, "Failed to extract user ID from ID Token", http.StatusInternalServerError)
 		return
 	}
 
-	now := time.Now()
+	normalizedClaims, userID := s.normalizeOIDCClaims(r.Context(), rawClaims)
+	if userID == "" {
+		http.Error(w, "Failed to extract user ID from ID Token", http.StatusInternalServerError)
+		return
+	}
+
+	sessionID := uuid.New().String()
+	now := time.Now().UTC()
+	expiresAt := now.Add(s.sessionLifetime())
 	sess := &session.Session{
 		SessionID:    sessionID,
-		UserID:       claims.Email,
+		UserID:       userID,
 		Provider:     "oidc",
+		Claims:       normalizedClaims,
 		AccessToken:  oauth2Token.AccessToken(),
 		IDToken:      idToken.GetOriginalToken(),
 		RefreshToken: oauth2Token.RefreshToken(),
-		ExpiresAt:    oauth2Token.Expiry(),
+		ExpiresAt:    expiresAt,
 		CreatedAt:    now,
 	}
 
@@ -493,14 +523,16 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create session", http.StatusInternalServerError)
 		return
 	}
+	s.recordSessionCreated(r.Context())
 
 	// 6. Set Session Cookie
 	// The cookie outlives the upstream access token; the session store enforces expiry.
-	if err := s.cookieManager.SetSessionCookie(w, r, sessionID, now.Add(s.sessionLifetime())); err != nil {
+	if err := s.cookieManager.SetSessionCookie(w, r, sessionID, expiresAt); err != nil {
 		s.logger(r.Context()).Error("failed to set session cookie", zap.Error(err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+	s.cleanupReplacedSession(r, sessionID)
 
 	// 7. Redirect to return_to
 	returnTo := stateData.ReturnTo
@@ -605,7 +637,7 @@ func (s *Server) handleOpenIDCallback(w http.ResponseWriter, r *http.Request) {
 
 	// 4. Create session
 	sessionID := uuid.New().String()
-	now := time.Now()
+	now := time.Now().UTC()
 	expiresAt := now.Add(s.sessionLifetime())
 
 	sess := &session.Session{
@@ -622,6 +654,7 @@ func (s *Server) handleOpenIDCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create session", http.StatusInternalServerError)
 		return
 	}
+	s.recordSessionCreated(r.Context())
 
 	// 5. Set Session Cookie
 	if err := s.cookieManager.SetSessionCookie(w, r, sessionID, sess.ExpiresAt); err != nil {
@@ -629,6 +662,7 @@ func (s *Server) handleOpenIDCallback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+	s.cleanupReplacedSession(r, sessionID)
 
 	// 6. Redirect to return_to
 	returnTo := stateData.ReturnTo
@@ -663,11 +697,375 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Logged out"))
 }
 
-// handleSessions lists active sessions (admin endpoint).
+type sessionMetadata struct {
+	SessionID string    `json:"session_id"`
+	Provider  string    `json:"provider"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	IsCurrent bool      `json:"is_current"`
+}
+
+type sessionsListResponse struct {
+	Sessions []sessionMetadata `json:"sessions"`
+}
+
+type revokeSessionResponse struct {
+	Revoked bool `json:"revoked"`
+}
+
+type revokeSessionsResponse struct {
+	RevokedCount int `json:"revoked_count"`
+}
+
+func (s *Server) recordSessionCreated(ctx context.Context) {
+	if s.observability != nil && s.observability.MetricsProvider != nil {
+		s.observability.MetricsProvider.RecordSessionCreated(ctx)
+	}
+}
+
+// cleanupReplacedSession best-effort deletes an existing valid session_id cookie's
+// backing session when a browser re-authenticates or switches providers, preventing
+// orphaned duplicate sessions in GET /auth/sessions.
+func (s *Server) cleanupReplacedSession(r *http.Request, newSessionID string) {
+	if s.cookieManager == nil || s.sessionStore == nil {
+		return
+	}
+	ck, err := r.Cookie("session_id")
+	if err != nil || ck.Value == "" {
+		return
+	}
+	oldSessionID, err := s.cookieManager.Decode("session_id", ck.Value, s.sessionMaxAge())
+	if err != nil || oldSessionID == "" || oldSessionID == newSessionID {
+		return
+	}
+	if err := s.sessionStore.Delete(r.Context(), oldSessionID); err != nil && !errors.Is(err, session.ErrSessionNotFound) {
+		s.logger(r.Context()).Warn("failed to delete replaced session on re-authentication",
+			zap.String("session_id", oldSessionID),
+			zap.Error(err))
+	}
+}
+
+// resolveCallerSession validates the caller's session_id cookie and resolves the active session.
+// On failure it returns an HTTP status code (401, 500, or 503) and error message without writing to w.
+func (s *Server) resolveCallerSession(r *http.Request) (string, *session.Session, int, string) {
+	if s.cookieManager == nil || s.sessionStore == nil {
+		return "", nil, http.StatusInternalServerError, "internal server error"
+	}
+
+	ck, err := r.Cookie("session_id")
+	if err != nil || ck.Value == "" {
+		return "", nil, http.StatusUnauthorized, "unauthorized"
+	}
+
+	sessionID, err := s.cookieManager.Decode("session_id", ck.Value, s.sessionMaxAge())
+	if err != nil || sessionID == "" {
+		return "", nil, http.StatusUnauthorized, "unauthorized"
+	}
+
+	sess, err := s.sessionStore.Get(r.Context(), sessionID)
+	if err != nil {
+		if errors.Is(err, session.ErrSessionNotFound) {
+			return "", nil, http.StatusUnauthorized, "unauthorized"
+		}
+		s.logger(r.Context()).Error("failed to get caller session", zap.Error(err))
+		return "", nil, http.StatusServiceUnavailable, "session store unavailable"
+	}
+	if sess == nil {
+		return "", nil, http.StatusUnauthorized, "unauthorized"
+	}
+
+	return sessionID, sess, http.StatusOK, ""
+}
+
+// authenticateSessionCookie validates the caller's session_id cookie and resolves the active session.
+// On failure it writes the appropriate JSON error response (401, 500, or 503) and returns ok=false.
+func (s *Server) authenticateSessionCookie(w http.ResponseWriter, r *http.Request) (string, *session.Session, bool) {
+	sessionID, sess, statusCode, errMsg := s.resolveCallerSession(r)
+	if statusCode != http.StatusOK {
+		writeMeJSON(w, statusCode, map[string]string{"error": errMsg})
+		return "", nil, false
+	}
+	return sessionID, sess, true
+}
+
+// handleSessions lists all active sessions owned by the authenticated caller.
 func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	// TODO: List sessions for admin/debugging
-	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte("Sessions endpoint - to be implemented"))
+	currentSessionID, callerSess, ok := s.authenticateSessionCookie(w, r)
+	if !ok {
+		return
+	}
+
+	activeSessions, err := s.sessionStore.ListUserSessions(r.Context(), callerSess.UserID)
+	if err != nil {
+		s.logger(r.Context()).Error("failed to list user sessions",
+			zap.String("user_id", callerSess.UserID),
+			zap.Error(err))
+		writeMeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "session store unavailable"})
+		return
+	}
+
+	items := make([]sessionMetadata, 0, len(activeSessions))
+	for _, sess := range activeSessions {
+		if sess == nil {
+			continue
+		}
+		items = append(items, sessionMetadata{
+			SessionID: sess.SessionID,
+			Provider:  sess.Provider,
+			CreatedAt: sess.CreatedAt,
+			ExpiresAt: sess.ExpiresAt,
+			IsCurrent: sess.SessionID == currentSessionID,
+		})
+	}
+
+	writeMeJSON(w, http.StatusOK, sessionsListResponse{Sessions: items})
+}
+
+// handleRevokeSession revokes a single session owned by the authenticated caller.
+func (s *Server) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
+	currentSessionID, callerSess, ok := s.authenticateSessionCookie(w, r)
+	if !ok {
+		return
+	}
+
+	targetID := strings.TrimSpace(chi.URLParam(r, "session_id"))
+	if targetID == "" {
+		writeMeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+		return
+	}
+
+	if err := s.sessionStore.DeleteUserSession(r.Context(), callerSess.UserID, targetID); err != nil {
+		if errors.Is(err, session.ErrSessionNotFound) {
+			s.logger(r.Context()).Warn("rejected session revocation for missing or non-owned session",
+				zap.String("user_id", callerSess.UserID),
+				zap.String("session_id", targetID),
+				zap.String("outcome", "not_found"))
+			writeMeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			return
+		}
+		s.logger(r.Context()).Error("failed to delete target session",
+			zap.String("user_id", callerSess.UserID),
+			zap.String("session_id", targetID),
+			zap.Error(err))
+		writeMeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "session store unavailable"})
+		return
+	}
+
+	isCurrent := targetID == currentSessionID
+	if isCurrent {
+		s.cookieManager.ClearSessionCookie(w, r)
+	}
+
+	s.logger(r.Context()).Info("session revoked",
+		zap.String("user_id", callerSess.UserID),
+		zap.String("session_id", targetID),
+		zap.Bool("is_current", isCurrent),
+		zap.String("outcome", "revoked"))
+
+	writeMeJSON(w, http.StatusOK, revokeSessionResponse{Revoked: true})
+}
+
+// handleRevokeAllSessions revokes all sessions owned by the authenticated caller,
+// optionally preserving the caller's current session when ?exclude_current=true.
+func (s *Server) handleRevokeAllSessions(w http.ResponseWriter, r *http.Request) {
+	currentSessionID, callerSess, ok := s.authenticateSessionCookie(w, r)
+	if !ok {
+		return
+	}
+
+	excludeCurrent := false
+	if r.URL.Query().Has("exclude_current") {
+		parsed, err := strconv.ParseBool(r.URL.Query().Get("exclude_current"))
+		if err != nil {
+			writeMeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid exclude_current query parameter"})
+			return
+		}
+		excludeCurrent = parsed
+	}
+
+	keepSessionID := ""
+	if excludeCurrent {
+		keepSessionID = currentSessionID
+	}
+
+	revokedCount, err := s.sessionStore.RevokeUserSessionsExcept(r.Context(), callerSess.UserID, keepSessionID)
+	if err != nil {
+		s.logger(r.Context()).Error("failed to revoke user sessions",
+			zap.String("user_id", callerSess.UserID),
+			zap.Bool("exclude_current", excludeCurrent),
+			zap.Error(err))
+		writeMeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "session store unavailable"})
+		return
+	}
+
+	if !excludeCurrent {
+		s.cookieManager.ClearSessionCookie(w, r)
+	}
+
+	s.logger(r.Context()).Info("user sessions revoked",
+		zap.String("user_id", callerSess.UserID),
+		zap.Int("revoked_count", revokedCount),
+		zap.Bool("exclude_current", excludeCurrent),
+		zap.String("outcome", "revoked"))
+
+	writeMeJSON(w, http.StatusOK, revokeSessionsResponse{RevokedCount: revokedCount})
+}
+
+type meResponse struct {
+	Authenticated bool    `json:"authenticated"`
+	User          *meUser `json:"user,omitempty"`
+}
+
+type meUser struct {
+	ID     string `json:"id"`
+	Email  string `json:"email,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Tenant string `json:"tenant,omitempty"`
+}
+
+func (s *Server) effectiveTenantClaim() string {
+	if s.tenantClaim != "" {
+		return s.tenantClaim
+	}
+	return defaultTenantClaim
+}
+
+func stringClaim(raw map[string]interface{}, key string) string {
+	if raw == nil {
+		return ""
+	}
+	val, ok := raw[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(val)
+}
+
+func (s *Server) normalizeOIDCClaims(ctx context.Context, raw map[string]interface{}) (map[string]interface{}, string) {
+	claims := make(map[string]interface{})
+
+	sub := stringClaim(raw, "sub")
+	email := stringClaim(raw, "email")
+	// Verify email_verified before promoting email to UserID or normalized claims.
+	//
+	// Why: Session.UserID is the authorization key for `user_sessions:<UserID>` in
+	// GET/DELETE /auth/sessions and the primary `sub` in ExchangeSession JWTs.
+	// Trusting an unverified OIDC email claim (`email_verified: false`) would allow
+	// account/session squatting: an attacker with an unverified email matching a
+	// victim's address could list or revoke the victim's sessions and mint internal
+	// JWTs with the victim's identity.
+	//
+	// Policy:
+	// - When `email_verified` is present, accept boolean `true` or case-insensitive
+	//   string `"true"` (for federated IdPs that stringify booleans); any other value
+	//   (false, "false", nil, etc.) causes `email` to be treated as unverified and omitted.
+	// - When `email_verified` is omitted entirely, `email` remains usable because
+	//   Canonical's Ory Kratos + identity-platform-login-ui stack (`social_user_v0.json`
+	//   + `GetUserClaims`) does not store `email_verified` in Kratos `traits` and thus
+	//   omits `email_verified` from minted ID tokens.
+	if rawVerified, hasVerified := raw["email_verified"]; hasVerified {
+		verified := false
+		switch v := rawVerified.(type) {
+		case bool:
+			verified = v
+		case string:
+			verified = strings.EqualFold(strings.TrimSpace(v), "true")
+		}
+		if !verified {
+			s.logger(ctx).Warn("ignoring unverified OIDC email claim for UserID and normalized claims")
+			email = ""
+		}
+	}
+	givenName := stringClaim(raw, "given_name")
+	familyName := stringClaim(raw, "family_name")
+	name := stringClaim(raw, "name")
+	if name == "" && (givenName != "" || familyName != "") {
+		name = strings.TrimSpace(givenName + " " + familyName)
+	}
+	preferredUsername := stringClaim(raw, "preferred_username")
+	nickname := stringClaim(raw, "nickname")
+
+	if sub != "" {
+		claims["sub"] = sub
+	}
+	if email != "" {
+		claims["email"] = email
+	}
+	if name != "" {
+		claims["name"] = name
+	}
+	if givenName != "" {
+		claims["given_name"] = givenName
+	}
+	if preferredUsername != "" {
+		claims["preferred_username"] = preferredUsername
+	}
+	if nickname != "" {
+		claims["nickname"] = nickname
+	}
+
+	tenantKey := s.effectiveTenantClaim()
+	if rawVal, exists := raw[tenantKey]; exists {
+		if tenantStr, ok := rawVal.(string); ok {
+			if trimmed := strings.TrimSpace(tenantStr); trimmed != "" {
+				claims["tenant"] = trimmed
+			}
+		} else if rawVal != nil {
+			s.logger(ctx).Debug("ignoring non-string OIDC tenant claim", zap.String("claim", tenantKey))
+		}
+	}
+
+	claims["idp_provider"] = "oidc"
+
+	// Resolve OIDC UserID strictly from verified email or immutable `sub` (prefixed
+	// with `oidc:` so it cannot collide with emails or OpenID handles). Never fall back
+	// to `nickname` or `preferred_username`, which are unverified and mutable (OIDC Core §5.1/§5.7).
+	userID := email
+	if userID == "" && sub != "" {
+		userID = "oidc:" + sub
+	}
+
+	return claims, userID
+}
+
+func writeMeJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Vary", "Cookie")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+// handleMe returns minimal public user identity for the active session cookie.
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	_, sess, statusCode, errMsg := s.resolveCallerSession(r)
+	if statusCode != http.StatusOK {
+		if statusCode == http.StatusUnauthorized {
+			writeMeJSON(w, http.StatusUnauthorized, meResponse{Authenticated: false})
+			return
+		}
+		writeMeJSON(w, statusCode, map[string]string{"error": errMsg})
+		return
+	}
+
+	user := &meUser{
+		ID: sess.UserID,
+	}
+	if email := stringClaim(sess.Claims, "email"); email != "" {
+		user.Email = email
+	}
+	if name := stringClaim(sess.Claims, "name"); name != "" {
+		user.Name = name
+	}
+	if tenant := stringClaim(sess.Claims, "tenant"); tenant != "" {
+		user.Tenant = tenant
+	}
+
+	writeMeJSON(w, http.StatusOK, meResponse{
+		Authenticated: true,
+		User:          user,
+	})
 }
 
 // handleJWKS exposes the public key for JWT verification.
