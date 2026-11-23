@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
+import pytest
 from harness2.core import tree as harness_tree
 from harness2.substrate.omp import OMP_SURFACE
 from harness2.substrate.opencode import OPENCODE_SURFACE
@@ -12,6 +15,15 @@ from openspec_harness.adapter import RUNTIME_SCRIPTS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HARNESS2_DIR = REPO_ROOT / ".harness2"
+
+
+def _load_stop_hook_module():
+    script_path = REPO_ROOT / "scripts" / "openspec_stop_hook.py"
+    spec = importlib.util.spec_from_file_location("openspec_stop_hook", script_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def test_c1_to_c8_harness_surfaces_valid() -> None:
@@ -74,3 +86,93 @@ def test_c1_to_c8_harness_surfaces_valid() -> None:
     assert census["sub_agents"] == 2
     assert census["plugins"] == 1
     assert census["scripts"] >= 2
+
+    # Ensure OMP guard copies remain aligned and contain loop-prevention guards
+    repo_omp_guard = (REPO_ROOT / ".omp" / "extensions" / "openspec_guard.ts").read_text(encoding="utf-8")
+    base_omp_guard = (
+        HARNESS2_DIR / "harnesses" / "omp_base" / ".omp" / "extensions" / "openspec_guard.ts"
+    ).read_text(encoding="utf-8")
+    assert repo_omp_guard == base_omp_guard
+    assert "blockedOnce" in repo_omp_guard
+    assert "continuationActive" in repo_omp_guard
+    assert "stop_hook_active" in repo_omp_guard
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"continuationActive": True, "terminationReason": "NO_TOOL_CALL"},
+        {"executionNum": 1, "terminationReason": "NO_TOOL_CALL"},
+        {"stop_hook_active": True, "terminationReason": "NO_TOOL_CALL"},
+        {"stopHookActive": True, "terminationReason": "NO_TOOL_CALL"},
+        {"terminationReason": "USER_CANCELED"},
+        {"terminationReason": "ERROR"},
+        {"terminationReason": "MAX_INVOCATIONS"},
+        {"terminationReason": "MAX_FORCED_INVOCATIONS"},
+        {"terminationReason": "MAX_TOKEN_BUDGET_EXCEEDED"},
+        {"terminationReason": "NO_TOOL_CALL", "error": "tool execution failed"},
+    ],
+)
+def test_stop_hook_allows_without_looping_even_when_checks_fail(
+    tmp_path: Path, payload: dict[str, object]
+) -> None:
+    """Stop hook must allow exit on continuation/non-normal termination even if validators fail."""
+    mod = _load_stop_hook_module()
+    # tmp_path has no scripts/, so running checks would fail if not short-circuited.
+    result = mod.evaluate_stop_hook(payload, tmp_path)
+    assert result == {"decision": "allow"}
+
+
+def test_stop_hook_prompts_once_on_initial_failure_then_allows(tmp_path: Path) -> None:
+    """Initial normal stop with failing checks requests continuation once; subsequent stop allows."""
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir()
+    (scripts_dir / "validate_openspec.py").write_text("import sys; sys.exit(0)\n", encoding="utf-8")
+    (scripts_dir / "check_openspec_drift.py").write_text("import sys; sys.exit(1)\n", encoding="utf-8")
+
+    mod = _load_stop_hook_module()
+    first = mod.evaluate_stop_hook(
+        {"executionNum": 0, "continuationActive": False, "terminationReason": "NO_TOOL_CALL"},
+        tmp_path,
+    )
+    assert first["decision"] == "continue"
+    assert "check_openspec_drift.py" in first["reason"]
+
+    second = mod.evaluate_stop_hook(
+        {"executionNum": 1, "continuationActive": True, "terminationReason": "NO_TOOL_CALL"},
+        tmp_path,
+    )
+    assert second == {"decision": "allow"}
+
+
+def test_hooks_json_stop_command_end_to_end_prevents_loop() -> None:
+    """Running the exact Stop hook command from `.agents/hooks.json` parses stdin JSON safely."""
+    hooks_cfg = json.loads((REPO_ROOT / ".agents" / "hooks.json").read_text(encoding="utf-8"))
+    stop_cmd = hooks_cfg["openspec-guard"]["Stop"][0]["command"]
+    assert "openspec_stop_hook.py" in stop_cmd
+
+    # Simulate a continuation stop invoked from `.agents/` (Antigravity sets CWD to hooks.json dir).
+    proc = subprocess.run(
+        ["sh", "-c", stop_cmd],
+        cwd=str(REPO_ROOT / ".agents"),
+        input=json.dumps({"executionNum": 1, "continuationActive": True, "terminationReason": "NO_TOOL_CALL"}),
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout.strip()) == {"decision": "allow"}
+
+    # Simulate an initial normal stop when all OpenSpec checks pass.
+    proc_ok = subprocess.run(
+        ["sh", "-c", stop_cmd],
+        cwd=str(REPO_ROOT / ".agents"),
+        input=json.dumps({"executionNum": 0, "continuationActive": False, "terminationReason": "NO_TOOL_CALL"}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert proc_ok.returncode == 0, proc_ok.stderr
+    assert json.loads(proc_ok.stdout.strip()) == {"decision": "allow"}

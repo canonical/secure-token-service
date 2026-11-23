@@ -35,7 +35,7 @@ checks:
       path: internal/auth/hydra.go
       needles:
         - HydraTokenVerifier
-        - jwk.NewCache
+        - jwkfetch.NewCache
         - ErrTokenExpiringSoon
         - 5 * time.Second
     - id: grpc_exchange_token_handler

@@ -45,6 +45,9 @@ The last three parameters (tracer, monitor, logger) are **always** in this order
 
 ## Development Workflow
 
+### Git Workflow
+**NEVER** commit directly to `main` or `master`, and never push to those branches. Always create a feature branch (e.g. `IAM-1234-description`) and land changes via a pull request. If the current checkout is on `main`/`master`, branch off before making any commit.
+
 ### Setup
 ```bash
 # Regenerate mocks after interface changes
