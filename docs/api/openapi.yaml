@@ -450,7 +450,7 @@ paths:
         Deletes a single session owned by the authenticated caller. Returns `404 Not Found`
         for both missing sessions and sessions owned by another user to avoid revealing
         session ID existence. Clears the `session_id` cookie when revoking the caller's
-        current session. Enforces same-origin CSRF checks.
+        current session. Enforces same-origin CSRF protection via `http.NewCrossOriginProtection`.
       tags:
         - Sessions
       security:
@@ -746,7 +746,7 @@ components:
       properties:
         id:
           type: string
-          description: Primary user identifier matching internal JWT sub
+          description: Primary user identifier matching internal JWT sub (verified email, `oidc:<sub>` when OIDC email is absent/unverified, or OpenID nickname/claimed_id when OpenID email is absent)
           example: "alice@canonical.com"
         email:
           type: string

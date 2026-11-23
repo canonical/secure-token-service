@@ -23,9 +23,13 @@ This directory contains Istio manifests for exposing the secure-token-service us
 
 Via the gateway, these endpoints are accessible:
 - `/` - User info homepage
-- `/auth/login` - OIDC login initiation
+- `/auth/login` - OIDC/OpenID login initiation
 - `/auth/callback` - OIDC callback handler
+- `/auth/openid/callback` - Ubuntu One OpenID 2.0 callback handler
 - `/auth/logout` - Logout endpoint
+- `/auth/me` - Current authenticated user identity (`GET`)
+- `/auth/sessions` - Self-service active session listing (`GET`) and bulk revocation (`DELETE`)
+- `/auth/sessions/{session_id}` - Self-service single-session revocation (`DELETE`)
 - `/.well-known/jwks.json` - JSON Web Key Set
 - `/metrics` - Prometheus metrics
 
