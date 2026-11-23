@@ -44,18 +44,37 @@ Both OIDC and OpenID 2.0 authentication callbacks SHALL set the session record `
 ## MODIFIED Requirements
 
 ### Requirement: Upstream claims extraction and substitution
-When authenticating via Ubuntu One OpenID, the system SHALL extract available claims from verified SREG 1.1 and AX 1.0 extensions (`email`, `nickname`, `fullname`, and optional `given_name` and `tenant`), prioritizing SREG over AX. The system SHALL store available normalized claims in the session and omit absent optional attributes without failing login.
+When authenticating via Ubuntu One OpenID, the system SHALL extract available claims strictly from fields covered by `openid.signed` in verified SREG 1.1 and AX 1.0 extensions (`email`, `nickname`, `fullname`, and optional `given_name`), prioritizing SREG over AX. Unsigned parameters SHALL be ignored.
 
 #### Scenario: OpenID assertion contains full attributes
-- **WHEN** Ubuntu One returns an assertion with email `alice@canonical.com`, nickname `alice`, and fullname `Alice Smith` via SREG or AX
+- **WHEN** Ubuntu One returns a signed assertion with email `alice@canonical.com`, nickname `alice`, and fullname `Alice Smith` via SREG or AX
 - **THEN** the system maps these into normalized claims `email: "alice@canonical.com"`, `nickname: "alice"`, and `name: "Alice Smith"`
 - **THEN** the claims are stored in the session record
 
 #### Scenario: OpenID assertion with subset of attributes
-- **WHEN** Ubuntu One returns an assertion containing nickname and fullname but omitting email and tenant
+- **WHEN** Ubuntu One returns a signed assertion containing nickname and fullname but omitting email
 - **THEN** the system only extracts the available claims without failure
 - **THEN** the available claims are preserved in the session
 
-#### Scenario: OpenID assertion includes optional given_name or tenant
-- **WHEN** an OpenID 2.0 provider returns AX `first_name` or a tenancy attribute alongside standard attributes
-- **THEN** the system stores normalized `given_name` and `tenant` in the session claims
+#### Scenario: OpenID assertion includes optional given_name
+- **WHEN** an OpenID 2.0 provider returns a signed AX `first_name` attribute alongside standard attributes
+- **THEN** the system stores normalized `given_name` in the session claims and ignores any unsigned query parameters
+
+### Requirement: User identifier selection hierarchy
+For OIDC logins, the system SHALL resolve `UserID` strictly from verified `email` (when `email_verified` is not false/invalid) or `oidc:<sub>`, never falling back to mutable `nickname` or `preferred_username`. For OpenID 2.0 logins, the system SHALL resolve `UserID` from `email`, then `nickname`, then `claimed_id`. If none can be established, session creation SHALL fail.
+
+#### Scenario: User identified by email
+- **WHEN** an identity response contains a valid email address
+- **THEN** the session `UserID` is set to the email address
+
+#### Scenario: Fallback to nickname when email is missing
+- **WHEN** an OpenID response omits email but includes a nickname
+- **THEN** the session `UserID` is set to the nickname
+
+#### Scenario: Fallback to Claimed ID when both email and nickname are missing
+- **WHEN** an OpenID response contains only the OpenID `claimed_id`
+- **THEN** the session `UserID` is set to the `claimed_id`
+
+#### Scenario: Unverified OIDC email falls back to prefixed subject identifier
+- **WHEN** an OIDC ID token contains `email` alongside `email_verified: false` (even if `preferred_username` or `nickname` is present)
+- **THEN** the system omits `email` from normalized claims and sets `UserID` to `oidc:<sub>`

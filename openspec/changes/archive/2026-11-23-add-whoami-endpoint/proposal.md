@@ -6,7 +6,7 @@ Browser applications such as Portal hold only an opaque `HttpOnly` session cooki
 
 ## What Changes
 
-- Add `GET /auth/me` to return the authenticated user's minimal public identity (`id`, `email`, and optional `name` and `tenant`) using direct session-cookie authentication.
+- Add `GET /auth/me` to return the authenticated user's minimal public identity (`id`, and optional `email`, `name`, and `tenant`) using direct session-cookie authentication.
 - Return `401 Unauthorized` with `{ "authenticated": false }` when the session cookie is missing, invalid, expired, or revoked, and `503 Service Unavailable` when the session store is unreachable.
 - Enforce `Cache-Control: no-store`, `Vary: Cookie`, and `X-Content-Type-Options: nosniff` on `GET /auth/me` responses so responses stay authoritative and never leak through shared caches.
 - Extract and store normalized identity and tenancy claims (`sub`, `email`, `name` with `given_name` + `family_name` fallback, `given_name`, `preferred_username`, and a configurable `tenant` claim) during OIDC logins, matching OpenID 2.0 claim normalization and propagating them into internal JWTs.
@@ -31,7 +31,7 @@ Browser applications such as Portal hold only an opaque `HttpOnly` session cooki
 
 ### New Capabilities
 
-- `session-whoami`: Exposes `GET /auth/me` so browser clients verify authentication state and read minimal public user identity (`id`, `email`, optional `name` and `tenant`) directly from the active session cookie.
+- `session-whoami`: Exposes `GET /auth/me` so browser clients verify authentication state and read minimal public user identity (`id`, and optional `email`, `name`, and `tenant`) directly from the active session cookie.
 
 ### Modified Capabilities
 
@@ -39,7 +39,7 @@ Browser applications such as Portal hold only an opaque `HttpOnly` session cooki
 
 ## Impact
 
-- **HTTP API**: Adds `GET /auth/me` in [internal/http/server.go](../../../internal/http/server.go) and updates [docs/api/openapi.yaml](../../../docs/api/openapi.yaml).
-- **Authentication & Config**: Updates OIDC and OpenID callbacks in [internal/http/server.go](../../../internal/http/server.go), OpenID extraction in [internal/auth/openid/ubuntuone.go](../../../internal/auth/openid/ubuntuone.go), session extension in [cmd/sts/extend_sessions.go](../../../cmd/sts/extend_sessions.go), and configuration in [internal/config/config.go](../../../internal/config/config.go) (optional `OIDC_TENANT_CLAIM`).
-- **Downstream JWTs**: Normalized `name` and `tenant` claims stored in `Session.Claims` automatically propagate through `ExchangeSession` in [internal/grpc/server.go](../../../internal/grpc/server.go).
+- **HTTP API**: Adds `GET /auth/me` in [internal/http/server.go](../../../../internal/http/server.go) and updates [docs/api/openapi.yaml](../../../../docs/api/openapi.yaml).
+- **Authentication & Config**: Updates OIDC and OpenID callbacks in [internal/http/server.go](../../../../internal/http/server.go), OpenID extraction in [internal/auth/openid/ubuntuone.go](../../../../internal/auth/openid/ubuntuone.go), session extension in [cmd/sts/extend_sessions.go](../../../../cmd/sts/extend_sessions.go), and configuration in [internal/config/config.go](../../../../internal/config/config.go) (optional `OIDC_TENANT_CLAIM`).
+- **Downstream JWTs**: Normalized `name` and `tenant` claims stored in `Session.Claims` automatically propagate through `ExchangeSession` in [internal/grpc/server.go](../../../../internal/grpc/server.go).
 - **Backward Compatibility**: Additive and non-breaking. In-flight sessions created before deployment omit optional `name` and `tenant` until the user signs in again.

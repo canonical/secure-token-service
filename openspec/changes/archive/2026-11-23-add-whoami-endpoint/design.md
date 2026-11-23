@@ -4,14 +4,14 @@
 
 See [proposal.md](proposal.md) for product motivation and [specs/session-whoami/spec.md](specs/session-whoami/spec.md) and [specs/claims-normalization/spec.md](specs/claims-normalization/spec.md) for behavioral requirements.
 
-Today, [internal/http/server.go](../../../internal/http/server.go) decodes the AEAD `session_id` cookie via `CookieManager` and reads sessions from Valkey (`ValkeyStore`) in `handleHome` and `handleLogout`. However:
+Today, [internal/http/server.go](../../../../internal/http/server.go) decodes the AEAD `session_id` cookie via `CookieManager` and reads sessions from Valkey (`ValkeyStore`) in `handleHome` and `handleLogout`. However:
 
 - `handleCallback` (OIDC) decodes only `email` from the verified ID token, leaves `Session.Claims` as `nil`, and stores `oauth2Token.Expiry()` in `Session.ExpiresAt` while setting cookie and Valkey TTL from `SESSION_EXPIRY`.
 - `handleOpenIDCallback` (Ubuntu One OpenID 2.0) populates `Session.Claims` and sets `Session.ExpiresAt = now.Add(s.sessionLifetime())`, but does not preserve optional `given_name` or tenancy attributes when returned.
 - `cmd/sts/extend_sessions.go` updates `Session.ExpiresAt = newToken.Expiry` rather than aligning with the extended Valkey TTL.
 - `Server.Router()` and `Server.StartWithMiddleware()` duplicate HTTP route registration.
 
-No PostgreSQL schema changes apply because PostgreSQL stores only `hydra_jwk` signing keys ([001_create_jwks_table.sql](../../../internal/db/migrations/001_create_jwks_table.sql)).
+No PostgreSQL schema changes apply because PostgreSQL stores only `hydra_jwk` signing keys ([001_create_jwks_table.sql](../../../../internal/db/migrations/001_create_jwks_table.sql)).
 
 ## Goals / Non-Goals
 
@@ -66,7 +66,7 @@ sequenceDiagram
 
 `GET /auth/me` validates the `session_id` cookie directly in STS instead of requiring an API Gateway to exchange the cookie for an internal JWT first.
 
-- **Rationale**: STS already owns both `CookieManager` and Valkey. Direct validation avoids a `Gateway -> STS (gRPC) -> Gateway -> STS (HTTP)` hairpin loop, preserves immediate revocation truth against Valkey, and keeps JWTs strictly server-to-server per [ADR-004](../../../docs/adr/004-phantom-token-pattern.md).
+- **Rationale**: STS already owns both `CookieManager` and Valkey. Direct validation avoids a `Gateway -> STS (gRPC) -> Gateway -> STS (HTTP)` hairpin loop, preserves immediate revocation truth against Valkey, and keeps JWTs strictly server-to-server per [ADR-004](../../../../docs/adr/004-phantom-token-pattern.md).
 - **Alternatives Considered**:
   - *Gateway-injected internal JWT*: Adds latency, introduces stale-JWT revocation lag up to `JWT_EXPIRY`, and forces browser auth routes through token exchange.
   - *Stateless user info in cookie*: Eliminates Valkey reads but breaks immediate revocation and bloats every request's `Cookie` header.
@@ -76,7 +76,7 @@ sequenceDiagram
 OIDC claim extraction runs once during `handleCallback` by decoding the verified ID token into a `map[string]interface{}` and writing normalized string fields (`sub`, `email`, `name`, `given_name`, `preferred_username`, `idp_provider`, and optional `tenant`) into `Session.Claims`.
 
 - **Rationale**: Keeps `GET /auth/me` to a single O(1) Valkey read with zero JWT re-parsing or upstream `/userinfo` calls. Storing normalized claims in `Session.Claims` also propagates `name` and `tenant` consistently into `ExchangeSession` internal JWTs.
-- **Configurable Tenancy Claim**: Add `OIDCTenantClaim` (`envconfig:"OIDC_TENANT_CLAIM" default:"tenant"`) in [internal/config/config.go](../../../internal/config/config.go) and pass it via `WithTenantClaim(claim string)` on `httpserver.Server`. Non-string or empty values are ignored rather than failing login.
+- **Configurable Tenancy Claim**: Add `OIDCTenantClaim` (`envconfig:"OIDC_TENANT_CLAIM" default:"tenant"`) in [internal/config/config.go](../../../../internal/config/config.go) and pass it via `WithTenantClaim(claim string)` on `httpserver.Server`. Non-string or empty values are ignored rather than failing login.
 - **Alternatives Considered**:
   - *Parse `Session.IDToken` on every `/auth/me` call*: Wastes CPU on every poll and couples whoami to raw OIDC token format.
   - *Call upstream `/userinfo` on `/auth/me`*: Adds network latency, upstream rate-limit risk, and availability coupling.
@@ -99,13 +99,13 @@ type meUser struct {
 }
 ```
 
-- **Rationale**: Struct allowlisting guarantees upstream `AccessToken`, `IDToken`, `RefreshToken`, `SessionID`, and extra claims cannot leak accidentally. `ID` uses `sess.UserID` (matching `ExchangeSession`'s `sub`). `Email` resolves from `sess.Claims["email"]` or `sess.UserID` when it contains `@` (supporting legacy sessions with `Claims == nil`).
+- **Rationale**: Struct allowlisting guarantees upstream `AccessToken`, `IDToken`, `RefreshToken`, `SessionID`, and extra claims cannot leak accidentally. `ID` uses `sess.UserID` (matching `ExchangeSession`'s `sub`). `Email` resolves strictly from `sess.Claims["email"]` and is omitted when absent so unverified `@`-containing identifiers are never surfaced as verified emails.
 - **Alternatives Considered**:
   - *Serialize `sess.Claims` directly*: Leaks extra IdP attributes and breaks the minimal-surface contract.
 
 ### 4. Unified `Session.ExpiresAt` Derived from `SESSION_EXPIRY`
 
-Set `Session.ExpiresAt = now.Add(s.sessionLifetime())` in both `handleCallback` and `handleOpenIDCallback`, and set `sess.ExpiresAt = time.Now().Add(ttl)` in `extendOneSession` ([cmd/sts/extend_sessions.go](../../../cmd/sts/extend_sessions.go)).
+Set `Session.ExpiresAt = now.Add(s.sessionLifetime())` in both `handleCallback` and `handleOpenIDCallback`, and set `sess.ExpiresAt = time.Now().Add(ttl)` in `extendOneSession` ([cmd/sts/extend_sessions.go](../../../../cmd/sts/extend_sessions.go)).
 
 - **Rationale**: Keeps `Session.ExpiresAt`, Valkey TTL, and `session_id` cookie expiry synchronized across providers and makes `handleHome` and future session listing accurate.
 - **Alternatives Considered**:
@@ -128,7 +128,7 @@ Return `Cache-Control: no-store`, `Vary: Cookie`, and `X-Content-Type-Options: n
 ## Risks / Trade-offs
 
 - **[Authenticated SPA polling loop spams Valkey]** -> Mitigate via deployment ingress/gateway rate limiting on `/auth/me` and Valkey O(1) lookup efficiency; monitor `http.server.request.count` for `/auth/me`.
-- **[In-flight OIDC sessions created before rollout have `Claims == nil`]** -> Mitigate by falling back to `sess.UserID` for `id` and `email` (when containing `@`) and omitting `name`/`tenant` until next login.
+- **[In-flight OIDC sessions created before rollout have `Claims == nil`]** -> Mitigate by returning `user.id` from `sess.UserID` and omitting `email`, `name`, and `tenant` until next login.
 - **[Upstream IdP emits non-string tenant claim (e.g., array)]** -> Mitigate by extracting only non-empty string values and logging a debug message when ignored.
 - **[Existing `Server.Router()` vs `StartWithMiddleware()` drift]** -> Mitigate by consolidating route mounting into a single helper used by both methods.
 

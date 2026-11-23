@@ -1,10 +1,9 @@
-# Spec Delta
+# session-management Specification
 
 ## Purpose
-
 Defines self-service HTTP endpoints (`GET /auth/sessions`, `DELETE /auth/sessions/{session_id}`, and `DELETE /auth/sessions`) so signed-in users can view all of their open sessions and revoke a single session or all sessions using their active session cookie.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Self-service active session listing
 When an authenticated user calls `GET /auth/sessions` with a valid `session_id` cookie, the system SHALL return `200 OK` with a JSON object listing all active sessions owned by that user. Each item SHALL contain only `session_id`, `provider`, `created_at`, `expires_at` (derived from active store TTL), and `is_current`, with `Cache-Control: no-store`, `Vary: Cookie`, and `X-Content-Type-Options: nosniff`.
@@ -68,7 +67,7 @@ When an authenticated user calls `DELETE /auth/sessions`, the system SHALL revok
 - **THEN** the system returns `401 Unauthorized`
 
 ### Requirement: Same-origin CSRF protection for session revocation
-Before processing `DELETE /auth/sessions` or `DELETE /auth/sessions/{session_id}`, the system SHALL enforce same-origin checks and reject cross-origin requests with `403 Forbidden`. The system SHALL accept `Sec-Fetch-Site: same-origin`, fall back to verifying that `Origin` matches the request host when `Sec-Fetch-Site` is absent, and allow non-browser requests omitting both headers.
+Before processing state-changing cookie routes (`POST /auth/logout`, `DELETE /auth/sessions`, and `DELETE /auth/sessions/{session_id}`), the system SHALL enforce cross-origin protection using Go's `http.NewCrossOriginProtection` and reject cross-origin browser requests with `403 Forbidden`, while allowing same-origin browser requests and non-browser requests omitting `Sec-Fetch-Site` and `Origin`.
 
 #### Scenario: Browser same-origin request accepted
 - **WHEN** a browser sends `DELETE /auth/sessions` with `Sec-Fetch-Site: same-origin` and a valid `session_id` cookie
@@ -87,7 +86,7 @@ Before processing `DELETE /auth/sessions` or `DELETE /auth/sessions/{session_id}
 - **THEN** the system allows the request to proceed
 
 ### Requirement: Bounded route observability and backward compatibility
-The system SHALL record HTTP metrics for `/auth/sessions/{session_id}` using the parameterized route template instead of raw session IDs to avoid unbounded metric cardinality. Replacing the `501 Not Implemented` placeholder at `GET /auth/sessions` SHALL preserve existing `/auth/login`, `/auth/logout`, and gRPC `RevokeUserSessions` behavior.
+The system SHALL record HTTP metrics for `/auth/sessions/{session_id}` using the parameterized route template instead of raw session IDs to avoid unbounded metric cardinality. Replacing the `501 Not Implemented` placeholder at `GET /auth/sessions` SHALL preserve existing `/auth/login`, same-origin/non-browser `POST /auth/logout`, and gRPC `RevokeUserSessions` behavior.
 
 #### Scenario: Single-session revocation emits parameterized route metric
 - **WHEN** a client calls `DELETE /auth/sessions/550e8400-e29b-41d4-a716-446655440000`
@@ -95,4 +94,4 @@ The system SHALL record HTTP metrics for `/auth/sessions/{session_id}` using the
 
 #### Scenario: Existing authentication and gRPC revocation contracts unchanged
 - **WHEN** the session CRUD endpoints are enabled
-- **THEN** `POST /auth/logout` and gRPC `RevokeUserSessions` continue to operate with full backward compatibility
+- **THEN** same-origin browser and non-browser `POST /auth/logout` requests and gRPC `RevokeUserSessions` continue to operate with backward compatibility (while cross-origin browser `POST /auth/logout` requests are rejected with `403 Forbidden`)

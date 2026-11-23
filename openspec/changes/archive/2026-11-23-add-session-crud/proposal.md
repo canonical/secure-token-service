@@ -19,7 +19,7 @@ Signed-in users can currently log out only from their active browser session and
 - Cross-user administrative session listing or revocation over HTTP (cross-user revocation remains on gRPC `RevokeUserSessions`).
 - Capturing or exposing client IP addresses, device names, or `User-Agent` strings in v1 session listings.
 - Cross-origin CORS support for browser clients on separate origins (this change assumes same-origin access behind a reverse proxy).
-- Immediate invalidation of already-minted internal short-lived JWTs (per [ADR-004](../../../docs/adr/004-phantom-token-pattern.md), existing JWTs remain valid until their short expiry).
+- Immediate invalidation of already-minted internal short-lived JWTs (per [ADR-004](../../../../docs/adr/004-phantom-token-pattern.md), existing JWTs remain valid until their short expiry).
 
 ## Success Metrics
 
@@ -38,7 +38,7 @@ Signed-in users can currently log out only from their active browser session and
 
 ## Impact
 
-- **HTTP API**: Replaces the `501` stub for `GET /auth/sessions` and adds `DELETE /auth/sessions` and `DELETE /auth/sessions/{session_id}` in [internal/http/server.go](../../../internal/http/server.go), plus updates [docs/api/openapi.yaml](../../../docs/api/openapi.yaml).
-- **Session Store**: Adds per-user session listing (with TTL-derived expiration and stale-ID pruning) and selective revocation methods to [internal/session/store.go](../../../internal/session/store.go).
-- **Observability**: Updates `HTTPMetricsMiddleware` in [internal/observability/metrics.go](../../../internal/observability/metrics.go) to report route templates rather than raw URL paths.
+- **HTTP API**: Replaces the `501` stub for `GET /auth/sessions` and adds `DELETE /auth/sessions` and `DELETE /auth/sessions/{session_id}` in [internal/http/server.go](../../../../internal/http/server.go), plus updates [docs/api/openapi.yaml](../../../../docs/api/openapi.yaml).
+- **Session Store**: Adds per-user session listing (with TTL-derived expiration and stale-ID pruning) and selective revocation methods to [internal/session/store.go](../../../../internal/session/store.go).
+- **Observability**: Updates `HTTPMetricsMiddleware` in [internal/observability/metrics.go](../../../../internal/observability/metrics.go) to report route templates rather than raw URL paths.
 - **Backward Compatibility**: Replaces the unimplemented `501` stub at `GET /auth/sessions` with the authenticated self-service endpoint; existing `/auth/login`, `/auth/logout`, and gRPC `RevokeUserSessions` behaviors remain unchanged.
