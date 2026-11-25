@@ -499,6 +499,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	normalizedClaims, userID := s.normalizeOIDCClaims(r.Context(), rawClaims)
 	if userID == "" {
+		s.logger(r.Context()).Warn("rejecting OIDC callback without verified email UserID")
 		http.Error(w, "Failed to extract user ID from ID Token", http.StatusInternalServerError)
 		return
 	}
@@ -624,16 +625,10 @@ func (s *Server) handleOpenIDCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if claims.Email != "" {
-		s.logger(r.Context()).Info("OpenID authenticated user",
-			zap.String("user_id", userID),
-			zap.String("email", claims.Email),
-			zap.String("claimed_id", claims.ClaimedID))
-	} else {
-		s.logger(r.Context()).Warn("OpenID callback missing email attribute",
-			zap.String("user_id", userID),
-			zap.String("claimed_id", claims.ClaimedID))
-	}
+	s.logger(r.Context()).Info("OpenID authenticated user",
+		zap.String("user_id", userID),
+		zap.String("email", claims.Email),
+		zap.String("claimed_id", claims.ClaimedID))
 
 	// 4. Create session
 	sessionID := uuid.New().String()
@@ -1017,15 +1012,9 @@ func (s *Server) normalizeOIDCClaims(ctx context.Context, raw map[string]interfa
 
 	claims["idp_provider"] = "oidc"
 
-	// Resolve OIDC UserID strictly from verified email or immutable `sub` (prefixed
-	// with `oidc:` so it cannot collide with emails or OpenID handles). Never fall back
-	// to `nickname` or `preferred_username`, which are unverified and mutable (OIDC Core §5.1/§5.7).
-	userID := email
-	if userID == "" && sub != "" {
-		userID = "oidc:" + sub
-	}
-
-	return claims, userID
+	// Resolve OIDC UserID strictly from verified email with no runtime fallback
+	// to `sub`, `nickname`, or `preferred_username`.
+	return claims, email
 }
 
 func writeMeJSON(w http.ResponseWriter, statusCode int, payload interface{}) {

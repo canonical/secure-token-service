@@ -691,7 +691,7 @@ func TestVerifyCallback_SREGFallback(t *testing.T) {
 	})
 }
 
-func TestClaims_UserIDHierarchy(t *testing.T) {
+func TestClaims_UserID(t *testing.T) {
 	tests := []struct {
 		name       string
 		claims     openid.Claims
@@ -699,7 +699,7 @@ func TestClaims_UserIDHierarchy(t *testing.T) {
 		wantErr    bool
 	}{
 		{
-			name: "email preferred when all present",
+			name: "email returned when all claims present",
 			claims: openid.Claims{
 				Email:     "user@canonical.com",
 				Nickname:  "user_nick",
@@ -709,21 +709,23 @@ func TestClaims_UserIDHierarchy(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name: "fallback to nickname when email absent",
+			name: "error when email absent despite nickname and claimed_id",
 			claims: openid.Claims{
 				Nickname:  "user_nick",
 				ClaimedID: "https://login.ubuntu.com/+id/user123",
 			},
-			wantUserID: "user_nick",
-			wantErr:    false,
+			wantUserID: "",
+			wantErr:    true,
 		},
 		{
-			name: "fallback to claimed_id when email and nickname absent",
+			name: "error when email is whitespace only",
 			claims: openid.Claims{
+				Email:     "   \t\n ",
+				Nickname:  "user_nick",
 				ClaimedID: "https://login.ubuntu.com/+id/user123",
 			},
-			wantUserID: "https://login.ubuntu.com/+id/user123",
-			wantErr:    false,
+			wantUserID: "",
+			wantErr:    true,
 		},
 		{
 			name:       "error when all absent",

@@ -152,7 +152,7 @@ paths:
       summary: Ubuntu One OpenID 2.0 callback endpoint
       description: |
         Handles Ubuntu One OpenID 2.0 callback verification via direct check_authentication POST.
-        Extracts user identity (email/nickname/claimed_id) and attribute exchange claims, creates session,
+        Extracts verified email user identity and attribute exchange claims, creates session,
         and sets standardized session cookie.
       tags:
         - Authentication
@@ -746,7 +746,7 @@ components:
       properties:
         id:
           type: string
-          description: Primary user identifier matching internal JWT sub (verified email, `oidc:<sub>` when OIDC email is absent/unverified, or OpenID nickname/claimed_id when OpenID email is absent)
+          description: Primary user identifier matching internal JWT sub (verified email)
           example: "alice@canonical.com"
         email:
           type: string

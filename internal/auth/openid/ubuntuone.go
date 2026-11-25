@@ -94,21 +94,13 @@ type Claims struct {
 	Raw       map[string]interface{} `json:"raw,omitempty"`
 }
 
-// UserID returns the resolved user identifier according to the required hierarchy:
-// 1. Email (if available)
-// 2. Nickname / preferred_username (if email unavailable)
-// 3. ClaimedID (if nickname and email unavailable)
+// UserID resolves the user identifier strictly from signed Email with no fallback
+// to Nickname or ClaimedID, failing closed when Email is absent.
 func (c *Claims) UserID() (string, error) {
-	if c.Email != "" {
-		return c.Email, nil
+	if email := strings.TrimSpace(c.Email); email != "" {
+		return email, nil
 	}
-	if c.Nickname != "" {
-		return c.Nickname, nil
-	}
-	if c.ClaimedID != "" {
-		return c.ClaimedID, nil
-	}
-	return "", errors.New("no valid user identity found in OpenID response")
+	return "", errors.New("missing email in OpenID response")
 }
 
 // NormalizedClaims returns a map of normalized claims suitable for storing in a session

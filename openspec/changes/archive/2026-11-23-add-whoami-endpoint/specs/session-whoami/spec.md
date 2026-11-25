@@ -19,11 +19,6 @@ When a client calls `GET /auth/me` with a valid `session_id` cookie, the system 
 - **THEN** the system returns `200 OK` with `authenticated: true` and `user` containing `id`, `email`, and `name`
 - **THEN** the `tenant` key is omitted from `user`
 
-#### Scenario: OpenID session identified without email
-- **WHEN** a browser sends `GET /auth/me` for an Ubuntu One OpenID session whose `UserID` fell back to `nickname` or `claimed_id` with no `email`
-- **THEN** the system returns `200 OK` with `authenticated: true` and `user.id` set to the session `UserID`
-- **THEN** the `email` key is omitted from `user`
-
 #### Scenario: Session without normalized claims omits email
 - **WHEN** a browser sends `GET /auth/me` with a valid session whose `Claims` map has no `email`
 - **THEN** the system returns `200 OK` with `authenticated: true` and `user.id` set to `UserID`

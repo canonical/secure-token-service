@@ -1306,6 +1306,43 @@ func TestHandleOpenIDCallback(t *testing.T) {
 		}
 	})
 
+	t.Run("Missing email despite nickname and claimed_id -> 400 Bad Request", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+		store := NewMockStore(ctrl)
+
+		server := NewServer(store, nil, cookieManager, nil, nil, WithOpenIDProvider(openIDProvider))
+
+		cookieManager.EXPECT().
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "mock-state", Provider: "openid"}, nil)
+
+		cookieManager.EXPECT().
+			ClearAuthState(gomock.Any(), gomock.Any())
+
+		openIDProvider.EXPECT().
+			VerifyCallback(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(&openid.Claims{
+				Nickname:  "nick",
+				ClaimedID: "https://login.ubuntu.com/+id/user123",
+			}, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=mock-state", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Failed to extract user ID") {
+			t.Errorf("Expected 'Failed to extract user ID', got %s", w.Body.String())
+		}
+	})
+
 	t.Run("Invalid return_to in state falls back to /", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
@@ -1972,6 +2009,7 @@ func TestHandleCallback_ClaimsNormalizationAndTenant(t *testing.T) {
 		name        string
 		tenantClaim string
 		rawClaims   map[string]interface{}
+		wantReject  bool
 		wantUserID  string
 		wantClaims  map[string]interface{}
 	}{
@@ -2046,7 +2084,7 @@ func TestHandleCallback_ClaimsNormalizationAndTenant(t *testing.T) {
 			},
 		},
 		{
-			name:        "unverified email_verified=false ignores preferred_username/nickname and falls back to prefixed sub",
+			name:        "unverified email_verified=false rejects login without fallback",
 			tenantClaim: "tenant",
 			rawClaims: map[string]interface{}{
 				"sub":                "oidc-sub-999",
@@ -2056,42 +2094,38 @@ func TestHandleCallback_ClaimsNormalizationAndTenant(t *testing.T) {
 				"nickname":           "victim",
 				"name":               "Attacker",
 			},
-			wantUserID: "oidc:oidc-sub-999",
-			wantClaims: map[string]interface{}{
-				"sub":                "oidc-sub-999",
-				"preferred_username": "victim@canonical.com",
-				"nickname":           "victim",
-				"name":               "Attacker",
-				"idp_provider":       "oidc",
-			},
+			wantReject: true,
 		},
 		{
-			name:        "email_verified string false falls back to prefixed sub",
+			name:        "email_verified string false rejects login without fallback",
 			tenantClaim: "tenant",
 			rawClaims: map[string]interface{}{
 				"sub":            "oidc-sub-str-false",
 				"email":          "victim@canonical.com",
 				"email_verified": "false",
 			},
-			wantUserID: "oidc:oidc-sub-str-false",
-			wantClaims: map[string]interface{}{
-				"sub":          "oidc-sub-str-false",
-				"idp_provider": "oidc",
-			},
+			wantReject: true,
 		},
 		{
-			name:        "email_verified nil falls back to prefixed sub",
+			name:        "email_verified nil rejects login without fallback",
 			tenantClaim: "tenant",
 			rawClaims: map[string]interface{}{
 				"sub":            "oidc-sub-nil",
 				"email":          "victim@canonical.com",
 				"email_verified": nil,
 			},
-			wantUserID: "oidc:oidc-sub-nil",
-			wantClaims: map[string]interface{}{
-				"sub":          "oidc-sub-nil",
-				"idp_provider": "oidc",
+			wantReject: true,
+		},
+		{
+			name:        "missing email with sub/preferred_username/nickname rejects login",
+			tenantClaim: "tenant",
+			rawClaims: map[string]interface{}{
+				"sub":                "oidc-sub-no-email",
+				"preferred_username": "alice@canonical.com",
+				"nickname":           "alice",
+				"name":               "Alice",
 			},
+			wantReject: true,
 		},
 	}
 
@@ -2125,20 +2159,32 @@ func TestHandleCallback_ClaimsNormalizationAndTenant(t *testing.T) {
 				*ptr = tc.rawClaims
 				return nil
 			})
-			oauth2Token.EXPECT().AccessToken().Return("at")
-			idToken.EXPECT().GetOriginalToken().Return("it")
-			oauth2Token.EXPECT().RefreshToken().Return("rt")
 
 			var saved *session.Session
-			store.EXPECT().Set(gomock.Any(), gomock.Any()).DoAndReturn(func(_ interface{}, s *session.Session, _ ...session.SetOption) error {
-				saved = s
-				return nil
-			})
-			cookieManager.EXPECT().SetSessionCookie(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+			if !tc.wantReject {
+				oauth2Token.EXPECT().AccessToken().Return("at")
+				idToken.EXPECT().GetOriginalToken().Return("it")
+				oauth2Token.EXPECT().RefreshToken().Return("rt")
+				store.EXPECT().Set(gomock.Any(), gomock.Any()).DoAndReturn(func(_ interface{}, s *session.Session, _ ...session.SetOption) error {
+					saved = s
+					return nil
+				})
+				cookieManager.EXPECT().SetSessionCookie(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+			}
 
 			req := httptest.NewRequest(http.MethodGet, "/auth/callback?state=s1&code=c1", nil)
 			w := httptest.NewRecorder()
 			server.Router().ServeHTTP(w, req)
+
+			if tc.wantReject {
+				if w.Code != http.StatusInternalServerError {
+					t.Fatalf("status = %d, want 500", w.Code)
+				}
+				if !strings.Contains(w.Body.String(), "Failed to extract user ID from ID Token") {
+					t.Errorf("body = %q, want Failed to extract user ID from ID Token", w.Body.String())
+				}
+				return
+			}
 
 			if w.Code != http.StatusFound {
 				t.Fatalf("status = %d, want 302", w.Code)
@@ -2266,7 +2312,7 @@ func TestHandleMe(t *testing.T) {
 		}
 	})
 
-	t.Run("OpenID session without email omits email -> 200", func(t *testing.T) {
+	t.Run("Session without email claim in Claims map omits email -> 200", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 

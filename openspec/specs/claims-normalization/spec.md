@@ -1,7 +1,7 @@
 # claims-normalization Specification
 
 ## Purpose
-Establishes a uniform claims extraction and fallback pipeline across upstream identity providers, allowing attributes from Ubuntu One OpenID assertions (such as email, nickname, and fullname) to be mapped and substituted in place of OIDC claims, stored in the session, and minted into downstream internal JWTs.
+Establishes a uniform claims extraction and normalization pipeline across upstream identity providers, allowing attributes from Ubuntu One OpenID assertions (such as email, nickname, and fullname) to be mapped and substituted in place of OIDC claims, stored in the session, and minted into downstream internal JWTs.
 
 For architectural diagrams and component details, see [Architecture Design: Claims Normalization and Mapping](../../changes/archive/2026-10-29-support-ubuntu-one-openid/design.md#claims-normalization-and-parity-strategy).
 
@@ -16,7 +16,7 @@ When authenticating via Ubuntu One OpenID, the system SHALL extract available cl
 - **THEN** the claims are stored in the session record
 
 #### Scenario: OpenID assertion with subset of attributes
-- **WHEN** Ubuntu One returns a signed assertion containing nickname and fullname but omitting email
+- **WHEN** Ubuntu One returns a signed assertion containing email and fullname but omitting nickname and given_name
 - **THEN** the system only extracts the available claims without failure
 - **THEN** the available claims are preserved in the session
 
@@ -24,24 +24,20 @@ When authenticating via Ubuntu One OpenID, the system SHALL extract available cl
 - **WHEN** an OpenID 2.0 provider returns a signed AX `first_name` attribute alongside standard attributes
 - **THEN** the system stores normalized `given_name` in the session claims and ignores any unsigned query parameters
 
-### Requirement: User identifier selection hierarchy
-For OIDC logins, the system SHALL resolve `UserID` strictly from verified `email` (when `email_verified` is not false/invalid) or `oidc:<sub>`, never falling back to mutable `nickname` or `preferred_username`. For OpenID 2.0 logins, the system SHALL resolve `UserID` from `email`, then `nickname`, then `claimed_id`. If none can be established, session creation SHALL fail.
+### Requirement: Single-source user identifier resolution
+For both OIDC and OpenID 2.0 logins, the system SHALL resolve `UserID` strictly from a single deterministic source: verified `email` (when OIDC `email_verified` is not false/invalid, or signed OpenID `email`), with no runtime fallback to `sub`, `nickname`, `preferred_username`, or `claimed_id`. If a verified `email` cannot be established, session creation SHALL fail closed.
 
-#### Scenario: User identified by email
-- **WHEN** an identity response contains a valid email address
+#### Scenario: User identified by verified email
+- **WHEN** an OIDC or OpenID identity response contains a verified or signed email address
 - **THEN** the session `UserID` is set to the email address
 
-#### Scenario: Fallback to nickname when email absent
-- **WHEN** an OpenID response contains a nickname but no email address
-- **THEN** the session `UserID` is set to the nickname
+#### Scenario: Unverified OIDC email rejects login
+- **WHEN** an OIDC ID token contains `email` alongside `email_verified: false`, `"false"`, or `nil` (even if `sub`, `preferred_username`, or `nickname` is present)
+- **THEN** the system omits `email` from normalized claims and rejects session creation without falling back
 
-#### Scenario: Fallback to claimed_id when nickname and email absent
-- **WHEN** an OpenID response contains only the OpenID `claimed_id`
-- **THEN** the session `UserID` is set to the `claimed_id`
-
-#### Scenario: Unverified OIDC email falls back to prefixed subject identifier
-- **WHEN** an OIDC ID token contains `email` alongside `email_verified: false` (even if `preferred_username` or `nickname` is present)
-- **THEN** the system omits `email` from normalized claims and sets `UserID` to `oidc:<sub>`
+#### Scenario: OpenID response missing email rejects login
+- **WHEN** an OpenID assertion omits signed `email` (even if `nickname` and `claimed_id` are present)
+- **THEN** the system rejects session creation without falling back
 
 ### Requirement: Internal JWT claim propagation
 When an API Gateway calls `ExchangeSession` over gRPC with a valid session cookie, the system SHALL mint an internal ES256 JWT containing all normalized claims stored within the session record.
