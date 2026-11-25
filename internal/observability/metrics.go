@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -293,7 +294,21 @@ func (mp *MetricsProvider) RecordKeyRotation(ctx context.Context) {
 	mp.keysRotatedCounter.Add(ctx, 1)
 }
 
-// HTTPMetricsMiddleware wraps HTTP handlers with metrics
+// routePatternForMetrics returns the parameterized chi route template when routed by chi
+// (or "unmatched" for unmatched chi routes) to avoid unbounded Prometheus label cardinality.
+func routePatternForMetrics(r *http.Request) string {
+	if rctx := chi.RouteContext(r.Context()); rctx != nil {
+		if pattern := rctx.RoutePattern(); pattern != "" {
+			return pattern
+		}
+		return "unmatched"
+	}
+	return r.URL.Path
+}
+
+// HTTPMetricsMiddleware wraps HTTP handlers with metrics.
+// It records the `http.route` attribute using parameterized chi route patterns
+// (e.g. "/auth/sessions/{session_id}") rather than raw paths for Prometheus label hygiene.
 func HTTPMetricsMiddleware(mp *MetricsProvider) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -305,7 +320,7 @@ func HTTPMetricsMiddleware(mp *MetricsProvider) func(http.Handler) http.Handler 
 			next.ServeHTTP(wrapped, r)
 
 			duration := time.Since(start)
-			mp.RecordHTTPRequest(r.Context(), r.Method, r.URL.Path, wrapped.statusCode, duration)
+			mp.RecordHTTPRequest(r.Context(), r.Method, routePatternForMetrics(r), wrapped.statusCode, duration)
 		})
 	}
 }

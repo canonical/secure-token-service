@@ -8,6 +8,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -117,5 +119,73 @@ func TestExtendOneSession_DryRunNoRefreshToken(t *testing.T) {
 	}
 	if result != "skipped" {
 		t.Errorf("expected 'skipped', got %q", result)
+	}
+}
+
+func TestExtendOneSession_UpdatesExpiresAtFromTTL(t *testing.T) {
+	t.Parallel()
+
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/token" || r.Method != http.MethodPost {
+			http.Error(w, "unexpected request", http.StatusBadRequest)
+			return
+		}
+		if err := r.ParseForm(); err != nil || r.FormValue("grant_type") != "refresh_token" {
+			http.Error(w, "invalid form", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"new-access","token_type":"Bearer","expires_in":300,"refresh_token":"new-refresh"}`))
+	}))
+	defer tokenSrv.Close()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStore := NewMockStore(ctrl)
+	ttl := 48 * time.Hour
+
+	var persisted *session.Session
+	var gotTTL time.Duration
+	mockStore.EXPECT().
+		Set(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, s *session.Session, opts ...session.SetOption) error {
+			persisted = s
+			var setOpts session.SetOptions
+			for _, opt := range opts {
+				opt(&setOpts)
+			}
+			if setOpts.TTL != nil {
+				gotTTL = *setOpts.TTL
+			}
+			return nil
+		})
+
+	sess := &session.Session{
+		SessionID:    "sess-extend-1",
+		UserID:       "alice@canonical.com",
+		RefreshToken: "old-refresh",
+	}
+	oauthCfg := &oauth2.Config{
+		ClientID:     "client",
+		ClientSecret: "secret",
+		Endpoint: oauth2.Endpoint{
+			TokenURL: tokenSrv.URL + "/token",
+		},
+	}
+
+	before := time.Now()
+	result, err := extendOneSession(context.Background(), mockStore, oauthCfg, sess, ttl, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if persisted == nil {
+		t.Fatal("expected session to be persisted")
+	}
+	if remaining := persisted.ExpiresAt.Sub(before); remaining < ttl-time.Minute || remaining > ttl+time.Minute {
+		t.Errorf("ExpiresAt delta = %v, want ~%v (result=%s)", remaining, ttl, result)
+	}
+	if gotTTL != ttl {
+		t.Errorf("WithTTL option = %v, want %v", gotTTL, ttl)
 	}
 }

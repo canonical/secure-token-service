@@ -33,7 +33,7 @@
 #   - to:
 #     - operation:
 #         paths: ["/auth/*"]
-#         methods: ["GET", "POST"]
+#         methods: ["GET", "POST", "DELETE"]
 #     - operation:
 #         paths: ["/"]
 #         methods: ["GET", "POST"]        

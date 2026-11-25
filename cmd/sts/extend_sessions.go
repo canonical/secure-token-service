@@ -203,9 +203,9 @@ func extendOneSession(
 		return "", fmt.Errorf("token refresh failed: %w", err)
 	}
 
-	// Update session with new tokens
+	// Update session with new tokens and unified expiration
 	sess.AccessToken = newToken.AccessToken
-	sess.ExpiresAt = newToken.Expiry
+	sess.ExpiresAt = time.Now().UTC().Add(ttl)
 
 	if newToken.RefreshToken != "" {
 		sess.RefreshToken = newToken.RefreshToken

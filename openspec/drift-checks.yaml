@@ -91,3 +91,61 @@ checks:
       needles:
         - /auth/openid/callback
         - provider
+
+  claims-normalization:
+    - id: oidc_tenant_claim_config
+      path: internal/config/config.go
+      needles:
+        - OIDCTenantClaim
+        - OIDC_TENANT_CLAIM
+    - id: oidc_email_verified_and_claims
+      path: internal/http/server.go
+      needles:
+        - normalizeOIDCClaims
+        - email_verified
+    - id: session_extend_unified_expiry
+      path: cmd/sts/extend_sessions.go
+      needles:
+        - extendOneSession
+        - time.Now().UTC().Add(ttl)
+
+  session-whoami:
+    - id: http_me_route_and_headers
+      path: internal/http/server.go
+      needles:
+        - /auth/me
+        - handleMe
+        - Cache-Control
+        - no-store
+        - normalizeOIDCClaims
+    - id: openapi_me_contract
+      path: docs/api/openapi.yaml
+      needles:
+        - /auth/me
+        - MeResponse
+
+  session-management:
+    - id: valkey_session_crud_methods
+      path: internal/session/store.go
+      needles:
+        - ListUserSessions
+        - DeleteUserSession
+        - RevokeUserSessionsExcept
+    - id: http_sessions_crud_routes
+      path: internal/http/server.go
+      needles:
+        - /auth/sessions/{session_id}
+        - handleSessions
+        - handleRevokeSession
+        - handleRevokeAllSessions
+        - NewCrossOriginProtection
+    - id: metrics_parameterized_route_pattern
+      path: internal/observability/metrics.go
+      needles:
+        - routePatternForMetrics
+        - RoutePattern
+    - id: openapi_sessions_contract
+      path: docs/api/openapi.yaml
+      needles:
+        - /auth/sessions
+        - /auth/sessions/{session_id}

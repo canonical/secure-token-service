@@ -22,7 +22,9 @@ servers:
 
 tags:
   - name: Authentication
-    description: OIDC authentication flow
+    description: OIDC and OpenID authentication flow
+  - name: Sessions
+    description: Self-service active session inspection and revocation
   - name: JWKS
     description: JSON Web Key Set endpoint
   - name: Health
@@ -150,7 +152,7 @@ paths:
       summary: Ubuntu One OpenID 2.0 callback endpoint
       description: |
         Handles Ubuntu One OpenID 2.0 callback verification via direct check_authentication POST.
-        Extracts user identity (email/nickname/claimed_id) and attribute exchange claims, creates session,
+        Extracts verified email user identity and attribute exchange claims, creates session,
         and sets standardized session cookie.
       tags:
         - Authentication
@@ -217,12 +219,13 @@ paths:
                 example: "Failed to create session"
 
 
- /auth/logout:
+  /auth/logout:
     post:
-      summary: Logout and destroy session  
+      summary: Logout and destroy session
       description: |
         Terminates the user session and clears the session cookie.
         Session is deleted from Valkey storage.
+        Enforces same-origin CSRF protection via `http.NewCrossOriginProtection`.
       tags:
         - Authentication
       parameters:
@@ -250,12 +253,371 @@ paths:
                   message:
                     type: string
                     example: "Logged out successfully"
+        '403':
+          description: Cross-origin request rejected by same-origin CSRF guard
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: Failed to delete session
           content:
             text/plain:
               schema:
                 type: string
+
+  /auth/sessions:
+    get:
+      summary: List caller's active sessions
+      description: |
+        Lists all active sessions owned by the authenticated caller.
+        Expiration timestamps are derived from the active session store TTL, and
+        expired session identifiers are lazily pruned from the user's session index.
+        Never returns upstream OAuth2 tokens or other users' sessions.
+      tags:
+        - Sessions
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Active sessions owned by the authenticated caller
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionListResponse'
+        '401':
+          description: Missing, invalid, or expired session cookie
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server misconfiguration
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Session store unavailable
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      summary: Revoke all sessions owned by the caller
+      description: |
+        Revokes all active sessions owned by the authenticated caller and clears the
+        `session_id` cookie. Pass `?exclude_current=true` to revoke only other
+        sessions while keeping the caller's current session and cookie active.
+        Enforces same-origin CSRF protection via `http.NewCrossOriginProtection`.
+      tags:
+        - Sessions
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: exclude_current
+          in: query
+          required: false
+          description: When `true`, preserves the caller's current session and cookie.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Sessions revoked
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+            Set-Cookie:
+              description: Cleared session cookie (sent only when `exclude_current` is false/omitted)
+              schema:
+                type: string
+                example: "session_id=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokeSessionsResponse'
+        '400':
+          description: Invalid `exclude_current` query parameter
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing, invalid, or expired session cookie
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Cross-origin request rejected by same-origin CSRF guard
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server misconfiguration
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Session store unavailable
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/sessions/{session_id}:
+    delete:
+      summary: Revoke a single session owned by the caller
+      description: |
+        Deletes a single session owned by the authenticated caller. Returns `404 Not Found`
+        for both missing sessions and sessions owned by another user to avoid revealing
+        session ID existence. Clears the `session_id` cookie when revoking the caller's
+        current session. Enforces same-origin CSRF protection via `http.NewCrossOriginProtection`.
+      tags:
+        - Sessions
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          description: Identifier of the session to revoke
+          schema:
+            type: string
+            example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Session revoked
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+            Set-Cookie:
+              description: Cleared session cookie (sent only when revoking the caller's current session)
+              schema:
+                type: string
+                example: "session_id=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokeSessionResponse'
+        '401':
+          description: Missing, invalid, or expired session cookie
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Cross-origin request rejected by same-origin CSRF guard
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session does not exist or does not belong to the caller
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server misconfiguration
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Session store unavailable
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/me:
+    get:
+      summary: Get current authenticated user identity
+      description: |
+        Returns minimal public identity for the caller's active `session_id` cookie without exposing upstream tokens.
+        Responses include `Cache-Control: no-store`, `Vary: Cookie`, and `X-Content-Type-Options: nosniff`.
+        The `tenant` field is populated from the configured `OIDC_TENANT_CLAIM` (default: `tenant`) when present.
+      tags:
+        - Authentication
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Active authenticated session
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '401':
+          description: Missing, invalid, expired, or revoked session
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - authenticated
+                properties:
+                  authenticated:
+                    type: boolean
+                    example: false
+        '500':
+          description: Internal server misconfiguration
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Session store unavailable
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControlNoStore'
+            Vary:
+              $ref: '#/components/headers/VaryCookie'
+            X-Content-Type-Options:
+              $ref: '#/components/headers/XContentTypeOptionsNosniff'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 
   /.well-known/jwks.json:
     get:
@@ -348,7 +710,54 @@ paths:
                   http_requests_total{method="GET",path="/health",status="200"} 42
 
 components:
+  headers:
+    CacheControlNoStore:
+      description: Prevents browser and shared-proxy caching of session responses
+      schema:
+        type: string
+        example: "no-store"
+    VaryCookie:
+      description: Ensures responses vary on the session cookie
+      schema:
+        type: string
+        example: "Cookie"
+    XContentTypeOptionsNosniff:
+      description: Disables MIME type sniffing
+      schema:
+        type: string
+        example: "nosniff"
   schemas:
+    MeResponse:
+      type: object
+      description: Current session authentication status and minimal user identity
+      required:
+        - authenticated
+        - user
+      properties:
+        authenticated:
+          type: boolean
+          example: true
+        user:
+          $ref: '#/components/schemas/MeUser'
+    MeUser:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          description: Primary user identifier matching internal JWT sub (verified email)
+          example: "alice@canonical.com"
+        email:
+          type: string
+          example: "alice@canonical.com"
+        name:
+          type: string
+          example: "Alice Smith"
+        tenant:
+          type: string
+          description: Normalized tenancy claim (configured via OIDC_TENANT_CLAIM)
+          example: "canonical"
     JWK:
       type: object
       description: JSON Web Key (public key for JWT verification)
@@ -389,6 +798,71 @@ components:
           type: string
           description: ECDSA Y coordinate (Base64url encoded)
           example: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"
+
+    SessionMetadata:
+      type: object
+      description: Minimal safe metadata for an active user session
+      required:
+        - session_id
+        - provider
+        - created_at
+        - expires_at
+        - is_current
+      properties:
+        session_id:
+          type: string
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        provider:
+          type: string
+          example: "oidc"
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-11-23T12:00:00Z"
+        expires_at:
+          type: string
+          format: date-time
+          example: "2026-11-24T12:00:00Z"
+        is_current:
+          type: boolean
+          example: true
+
+    SessionListResponse:
+      type: object
+      required:
+        - sessions
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionMetadata'
+
+    RevokeSessionResponse:
+      type: object
+      required:
+        - revoked
+      properties:
+        revoked:
+          type: boolean
+          example: true
+
+    RevokeSessionsResponse:
+      type: object
+      required:
+        - revoked_count
+      properties:
+        revoked_count:
+          type: integer
+          example: 2
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          example: "unauthorized"
 
   securitySchemes:
     SessionCookie:

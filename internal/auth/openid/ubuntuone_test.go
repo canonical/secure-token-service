@@ -167,13 +167,16 @@ func TestVerifyCallback_Success(t *testing.T) {
 	callbackQuery.Set("openid.ns", openid.OpenIDNS)
 	callbackQuery.Set("openid.return_to", "https://example.com/auth/openid/callback?state=xyz")
 	callbackQuery.Set("openid.sig", "sig-xyz")
-	callbackQuery.Set("openid.signed", "mode,identity,claimed_id,return_to,response_nonce,sig")
+	callbackQuery.Set("openid.signed", "mode,identity,claimed_id,return_to,response_nonce,sig,ns.ax,ax.type.email,ax.value.email,ax.type.nickname,ax.value.nickname,ax.type.fullname,ax.value.fullname")
 	callbackQuery.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"extra-random")
 	callbackQuery.Set("openid.claimed_id", "https://login.ubuntu.com/+id/user123")
 	callbackQuery.Set("openid.identity", "https://login.ubuntu.com/+id/user123")
 	callbackQuery.Set("openid.ns.ax", openid.AXNS)
+	callbackQuery.Set("openid.ax.type.email", openid.AXSchemaEmail)
 	callbackQuery.Set("openid.ax.value.email", "alice@canonical.com")
+	callbackQuery.Set("openid.ax.type.nickname", openid.AXSchemaNickname)
 	callbackQuery.Set("openid.ax.value.nickname", "alice")
+	callbackQuery.Set("openid.ax.type.fullname", openid.AXSchemaFullname)
 	callbackQuery.Set("openid.ax.value.fullname", "Alice Smith")
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+callbackQuery.Encode(), nil)
@@ -241,6 +244,7 @@ func TestVerifyCallback_Ext1NamespaceMapping(t *testing.T) {
 	callbackQuery.Set("openid.ext1.value.nickname", "bob")
 	callbackQuery.Set("openid.ext1.type.fullname", openid.AXSchemaFullname)
 	callbackQuery.Set("openid.ext1.value.fullname", "Bob Jones")
+	callbackQuery.Set("openid.signed", "mode,return_to,response_nonce,ns.ext1,ext1.type.email,ext1.value.email,ext1.type.nickname,ext1.value.nickname,ext1.type.fullname,ext1.value.fullname")
 	callbackQuery.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"extra")
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+callbackQuery.Encode(), nil)
@@ -283,6 +287,7 @@ func TestVerifyCallback_SREGResponse(t *testing.T) {
 	callbackQuery.Set("openid.sreg.fullname", "Canonical Test User")
 	callbackQuery.Set("openid.claimed_id", "https://sso.iam.test.canonical.com/+id/Xb6LTdm")
 	callbackQuery.Set("openid.identity", "https://sso.iam.test.canonical.com/+id/Xb6LTdm")
+	callbackQuery.Set("openid.signed", "mode,ns,return_to,response_nonce,claimed_id,identity,ns.sreg,sreg.email,sreg.nickname,sreg.fullname")
 	callbackQuery.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"extra")
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+callbackQuery.Encode(), nil)
@@ -345,6 +350,7 @@ func TestVerifyCallback_DynamicSREGNamespace(t *testing.T) {
 	callbackQuery.Set("openid.ext2.email", "ext2-user@example.com")
 	callbackQuery.Set("openid.ext2.nickname", "ext2-nick")
 	callbackQuery.Set("openid.ext2.fullname", "Ext2 Name")
+	callbackQuery.Set("openid.signed", "mode,ns,return_to,response_nonce,ns.ext2,ext2.email,ext2.nickname,ext2.fullname")
 	callbackQuery.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"extra")
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+callbackQuery.Encode(), nil)
@@ -425,6 +431,7 @@ func TestVerifyCallback_InvalidSignature(t *testing.T) {
 	q.Set("openid.mode", "id_res")
 	q.Set("openid.return_to", returnTo)
 	q.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"extra")
+	q.Set("openid.signed", "mode,return_to,response_nonce")
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
 	_, err := client.VerifyCallback(context.Background(), req, returnTo)
@@ -449,6 +456,7 @@ func TestVerifyCallback_ServerError(t *testing.T) {
 	q.Set("openid.mode", "id_res")
 	q.Set("openid.return_to", returnTo)
 	q.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"extra")
+	q.Set("openid.signed", "mode,return_to,response_nonce")
 
 	req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
 	_, err := client.VerifyCallback(context.Background(), req, returnTo)
@@ -507,6 +515,7 @@ func TestVerifyCallback_NonceReplay(t *testing.T) {
 	q.Set("openid.return_to", returnTo)
 	nonce := time.Now().UTC().Format(time.RFC3339) + "unique-token"
 	q.Set("openid.response_nonce", nonce)
+	q.Set("openid.signed", "mode,return_to,response_nonce")
 
 	req1 := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
 	_, err := client.VerifyCallback(context.Background(), req1, returnTo)
@@ -563,6 +572,7 @@ func TestVerifyCallback_TimestampSkew(t *testing.T) {
 			q.Set("openid.mode", "id_res")
 			q.Set("openid.return_to", returnTo)
 			q.Set("openid.response_nonce", tc.timestamp.Format(time.RFC3339)+tc.name)
+			q.Set("openid.signed", "mode,return_to,response_nonce")
 
 			req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
 			_, err := client.VerifyCallback(context.Background(), req, returnTo)
@@ -597,6 +607,7 @@ func TestVerifyCallback_ProviderNon200(t *testing.T) {
 			q.Set("openid.mode", "id_res")
 			q.Set("openid.return_to", returnTo)
 			q.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"extra")
+			q.Set("openid.signed", "mode,return_to,response_nonce")
 
 			req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
 			_, err := client.VerifyCallback(context.Background(), req, returnTo)
@@ -630,6 +641,7 @@ func TestVerifyCallback_SREGFallback(t *testing.T) {
 		q.Set("openid.sreg.email", "sreg@canonical.com")
 		q.Set("openid.sreg.nickname", "sreguser")
 		q.Set("openid.sreg.fullname", "SREG User")
+		q.Set("openid.signed", "mode,return_to,response_nonce,claimed_id,sreg.email,sreg.nickname,sreg.fullname")
 
 		req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
 		claims, err := client.VerifyCallback(context.Background(), req, returnTo)
@@ -660,6 +672,7 @@ func TestVerifyCallback_SREGFallback(t *testing.T) {
 		// Nickname and FullName in SREG
 		q.Set("openid.sreg.nickname", "mixednick")
 		q.Set("openid.sreg.fullname", "Mixed Fullname")
+		q.Set("openid.signed", "mode,return_to,response_nonce,claimed_id,ns.ax,ax.type.email,ax.value.email,sreg.nickname,sreg.fullname")
 
 		req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
 		claims, err := client.VerifyCallback(context.Background(), req, returnTo)
@@ -678,7 +691,7 @@ func TestVerifyCallback_SREGFallback(t *testing.T) {
 	})
 }
 
-func TestClaims_UserIDHierarchy(t *testing.T) {
+func TestClaims_UserID(t *testing.T) {
 	tests := []struct {
 		name       string
 		claims     openid.Claims
@@ -686,7 +699,7 @@ func TestClaims_UserIDHierarchy(t *testing.T) {
 		wantErr    bool
 	}{
 		{
-			name: "email preferred when all present",
+			name: "email returned when all claims present",
 			claims: openid.Claims{
 				Email:     "user@canonical.com",
 				Nickname:  "user_nick",
@@ -696,21 +709,23 @@ func TestClaims_UserIDHierarchy(t *testing.T) {
 			wantErr:    false,
 		},
 		{
-			name: "fallback to nickname when email absent",
+			name: "error when email absent despite nickname and claimed_id",
 			claims: openid.Claims{
 				Nickname:  "user_nick",
 				ClaimedID: "https://login.ubuntu.com/+id/user123",
 			},
-			wantUserID: "user_nick",
-			wantErr:    false,
+			wantUserID: "",
+			wantErr:    true,
 		},
 		{
-			name: "fallback to claimed_id when email and nickname absent",
+			name: "error when email is whitespace only",
 			claims: openid.Claims{
+				Email:     "   \t\n ",
+				Nickname:  "user_nick",
 				ClaimedID: "https://login.ubuntu.com/+id/user123",
 			},
-			wantUserID: "https://login.ubuntu.com/+id/user123",
-			wantErr:    false,
+			wantUserID: "",
+			wantErr:    true,
 		},
 		{
 			name:       "error when all absent",
@@ -737,4 +752,189 @@ func TestClaims_UserIDHierarchy(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtractClaims_SignedOnlyAndNoUnsignedFallback(t *testing.T) {
+	q := url.Values{
+		"openid.claimed_id":     {"https://login.ubuntu.com/+id/alice"},
+		"openid.ns.ax":          {"http://openid.net/srv/ax/1.0"},
+		"openid.ax.mode":        {"fetch_response"},
+		"openid.ax.type.email":  {"http://axschema.org/contact/email"},
+		"openid.ax.value.email": {"alice@canonical.com"},
+		"openid.ax.type.first":  {"http://axschema.org/namePerson/first"},
+		"openid.ax.value.first": {"Alice"},
+		"openid.signed":         {"claimed_id,ns.ax,ax.type.email,ax.value.email,ax.type.first,ax.value.first"},
+		// Unsigned injected parameters must be ignored.
+		"openid.sreg.nickname": {"spoofed-nick"},
+		"openid.sreg.tenant":   {"target-org"},
+		"tenant":               {"target-org"},
+		"email":                {"spoofed@evil.com"},
+		"openid.fullname":      {"Spoofed Name"},
+	}
+
+	claims := openid.ExtractClaims(q)
+	if claims.Email != "alice@canonical.com" {
+		t.Errorf("Email = %q, want alice@canonical.com", claims.Email)
+	}
+	if claims.GivenName != "Alice" {
+		t.Errorf("GivenName = %q, want Alice", claims.GivenName)
+	}
+	if claims.Nickname != "" {
+		t.Errorf("unsigned Nickname leaked: got %q, want empty", claims.Nickname)
+	}
+	if claims.FullName != "Alice" {
+		t.Errorf("FullName = %q, want Alice (unsigned openid.fullname must be ignored)", claims.FullName)
+	}
+
+	norm := claims.NormalizedClaims()
+	if norm["given_name"] != "Alice" {
+		t.Errorf("NormalizedClaims[given_name] = %v, want Alice", norm["given_name"])
+	}
+	if _, hasTenant := norm["tenant"]; hasTenant {
+		t.Errorf("unexpected tenant in OpenID NormalizedClaims: %v", norm["tenant"])
+	}
+}
+
+func TestVerifyCallback_RejectsDuplicateOpenIDParams(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("is_valid:true\n"))
+	}))
+	defer server.Close()
+
+	client := openid.NewClient(server.URL, "", server.Client())
+	returnTo := "https://example.com/auth/openid/callback"
+
+	baseQuery := func() url.Values {
+		q := url.Values{}
+		q.Set("openid.mode", "id_res")
+		q.Set("openid.return_to", returnTo)
+		q.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"dup")
+		q.Set("openid.claimed_id", "https://login.ubuntu.com/+id/attacker")
+		q.Set("openid.sreg.email", "attacker@example.com")
+		q.Set("openid.signed", "mode,return_to,response_nonce,claimed_id,sreg.email")
+		return q
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(q url.Values)
+	}{
+		{
+			name: "duplicate openid.sreg.email",
+			mutate: func(q url.Values) {
+				q["openid.sreg.email"] = []string{"victim@canonical.com", "attacker@example.com"}
+			},
+		},
+		{
+			name: "duplicate openid.signed",
+			mutate: func(q url.Values) {
+				q["openid.signed"] = []string{"mode,return_to,response_nonce,sreg.email", "mode,return_to,response_nonce"}
+			},
+		},
+		{
+			name: "duplicate openid.return_to",
+			mutate: func(q url.Values) {
+				q["openid.return_to"] = []string{returnTo, "https://evil.example.com/cb"}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			q := baseQuery()
+			tc.mutate(q)
+			req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
+			if _, err := client.VerifyCallback(context.Background(), req, returnTo); err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+		})
+	}
+}
+
+func TestVerifyCallback_RequiresCoreSignedFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("is_valid:true\n"))
+	}))
+	defer server.Close()
+
+	client := openid.NewClient(server.URL, "", server.Client())
+	returnTo := "https://example.com/auth/openid/callback"
+
+	tests := []struct {
+		name   string
+		signed string
+	}{
+		{name: "missing openid.signed", signed: ""},
+		{name: "missing return_to", signed: "mode,response_nonce,claimed_id"},
+		{name: "missing response_nonce", signed: "mode,return_to,claimed_id"},
+		{name: "missing claimed_id when present", signed: "mode,return_to,response_nonce"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			q := url.Values{}
+			q.Set("openid.mode", "id_res")
+			q.Set("openid.return_to", returnTo)
+			q.Set("openid.response_nonce", time.Now().UTC().Format(time.RFC3339)+"core-"+tc.name)
+			q.Set("openid.claimed_id", "https://login.ubuntu.com/+id/alice")
+			if tc.signed != "" {
+				q.Set("openid.signed", tc.signed)
+			}
+			req := httptest.NewRequest("GET", "/auth/openid/callback?"+q.Encode(), nil)
+			if _, err := client.VerifyCallback(context.Background(), req, returnTo); err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+		})
+	}
+}
+
+func TestExtractClaims_RejectsDuplicateParamsAndEnforcesAXTypeBinding(t *testing.T) {
+	t.Run("duplicate openid.sreg.email fails closed", func(t *testing.T) {
+		q := url.Values{
+			"openid.signed":     {"claimed_id,sreg.email"},
+			"openid.claimed_id": {"https://login.ubuntu.com/+id/attacker"},
+			"openid.sreg.email": {"victim@canonical.com", "attacker@example.com"},
+		}
+		claims := openid.ExtractClaims(q)
+		if claims.Email != "" {
+			t.Errorf("expected empty Email on duplicate openid.sreg.email, got %q", claims.Email)
+		}
+	})
+
+	t.Run("duplicate openid.signed fails closed", func(t *testing.T) {
+		q := url.Values{
+			"openid.signed":     {"claimed_id,sreg.email", "claimed_id"},
+			"openid.claimed_id": {"https://login.ubuntu.com/+id/attacker"},
+			"openid.sreg.email": {"victim@canonical.com"},
+		}
+		claims := openid.ExtractClaims(q)
+		if claims.Email != "" || claims.ClaimedID != "" {
+			t.Errorf("expected empty claims on duplicate openid.signed, got %+v", claims)
+		}
+	})
+
+	t.Run("AX alias confusion and missing type URI rejected", func(t *testing.T) {
+		q := url.Values{
+			"openid.claimed_id":          {"https://login.ubuntu.com/+id/attacker"},
+			"openid.ns.ax":               {openid.AXNS},
+			"openid.ax.type.email":       {openid.AXSchemaNickname},
+			"openid.ax.value.email":      {"victim@canonical.com"},
+			"openid.ax.value.given_name": {"SpoofedGiven"},
+			"openid.signed":              {"claimed_id,ns.ax,ax.type.email,ax.value.email,ax.value.given_name"},
+		}
+		claims := openid.ExtractClaims(q)
+		if claims.Email != "" {
+			t.Errorf("AX alias bound to nickname schema must not populate Email: got %q", claims.Email)
+		}
+		if claims.Nickname != "victim@canonical.com" {
+			t.Errorf("AX alias bound to nickname schema should populate Nickname: got %q", claims.Nickname)
+		}
+		if claims.GivenName != "" {
+			t.Errorf("AX value without signed type URI must not populate GivenName: got %q", claims.GivenName)
+		}
+	})
 }

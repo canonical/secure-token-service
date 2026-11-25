@@ -10,6 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"go.opentelemetry.io/otel/attribute"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"google.golang.org/grpc"
 )
 
@@ -152,5 +156,76 @@ func TestShutdownDisabledMetrics(t *testing.T) {
 	// Should not panic or return error
 	if err := mp.Shutdown(context.Background()); err != nil {
 		t.Errorf("expected no error on shutdown, got %v", err)
+	}
+}
+
+func TestHTTPMetricsMiddlewareUsesChiRoutePattern(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() {
+		_ = provider.Shutdown(context.Background())
+	})
+
+	mp := &MetricsProvider{
+		provider: provider,
+		meter:    provider.Meter("test-sts"),
+	}
+	if err := mp.initializeMetrics(); err != nil {
+		t.Fatalf("initializeMetrics failed: %v", err)
+	}
+
+	r := chi.NewRouter()
+	r.Use(HTTPMetricsMiddleware(mp))
+	r.Delete("/auth/sessions/{session_id}", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	rawUUIDPath := "/auth/sessions/550e8400-e29b-41d4-a716-446655440000"
+	req := httptest.NewRequest(http.MethodDelete, rawUUIDPath, nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	}
+
+	// Also test an unmatched 404 route to ensure bounded cardinality.
+	req404 := httptest.NewRequest(http.MethodGet, "/unknown/random-id-12345", nil)
+	rec404 := httptest.NewRecorder()
+	r.ServeHTTP(rec404, req404)
+	if rec404.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 Not Found, got %d", rec404.Code)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect failed: %v", err)
+	}
+
+	routes := make(map[string]int64)
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "http.server.request.count" {
+				continue
+			}
+			sum, ok := m.Data.(metricdata.Sum[int64])
+			if !ok {
+				t.Fatalf("unexpected metric data type %T", m.Data)
+			}
+			for _, dp := range sum.DataPoints {
+				if val, ok := dp.Attributes.Value(attribute.Key("http.route")); ok {
+					routes[val.AsString()] += dp.Value
+				}
+			}
+		}
+	}
+
+	if routes["/auth/sessions/{session_id}"] != 1 {
+		t.Errorf("expected http.route=\"/auth/sessions/{session_id}\" count=1, got routes=%v", routes)
+	}
+	if _, leaked := routes[rawUUIDPath]; leaked {
+		t.Errorf("raw UUID path %q leaked into http.route metric label: %v", rawUUIDPath, routes)
+	}
+	if routes["unmatched"] != 1 {
+		t.Errorf("expected http.route=\"unmatched\" count=1 for 404, got routes=%v", routes)
 	}
 }

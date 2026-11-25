@@ -170,6 +170,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		httpserver.WithOpenIDProvider(openIDClient),
 		httpserver.WithDefaultAuthProvider(cfg.DefaultAuthProvider),
 		httpserver.WithSessionExpiry(time.Duration(cfg.SessionExpiry)*time.Second),
+		httpserver.WithTenantClaim(cfg.OIDCTenantClaim),
 	)
 	go func() {
 		if err := httpSrvWithObs.StartWithMiddleware(cfg.HTTPPort); err != nil && err != http.ErrServerClosed {

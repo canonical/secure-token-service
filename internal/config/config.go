@@ -44,6 +44,7 @@ type Config struct {
 	OIDCClientSecret     string   `envconfig:"OIDC_CLIENT_SECRET" required:"true"`
 	OIDCRedirectURL      string   `envconfig:"OIDC_REDIRECT_URL" required:"true"`
 	OIDCScopes           []string `envconfig:"OIDC_SCOPES" default:"openid,profile,email,offline_access"`
+	OIDCTenantClaim      string   `envconfig:"OIDC_TENANT_CLAIM" default:"tenant"`
 	AllowedReturnToHosts []string `envconfig:"ALLOWED_RETURN_TO_HOSTS" default:""`
 
 	// Ubuntu One OpenID Configuration

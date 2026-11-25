@@ -205,7 +205,10 @@ sequenceDiagram
 - `GET /auth/callback` - OIDC callback handler
 - `GET /auth/openid/callback` - Ubuntu One OpenID 2.0 callback handler
 - `POST /auth/logout` - Session termination
-- `GET /auth/sessions` - List user sessions
+- `GET /auth/me` - Current authenticated user identity (`{authenticated, user}`)
+- `GET /auth/sessions` - List caller's active sessions
+- `DELETE /auth/sessions` - Revoke all caller sessions (supports `?exclude_current=true`)
+- `DELETE /auth/sessions/{session_id}` - Revoke a single owned session
 - `GET /.well-known/jwks.json` - **Public JWKS endpoint** (all active + retired keys)
 
 
@@ -369,11 +372,13 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 | `JWT_ISSUER` | `session-service` | JWT `iss` claim |
 | `JWT_AUDIENCE` | `internal-services` | JWT `aud` claim |
 | `JWT_EXPIRY` | `3600` | JWT expiry in seconds |
+| `SESSION_EXPIRY` | `86400` | Session lifetime in seconds |
 | `DEFAULT_AUTH_PROVIDER` | `oidc` | Default provider when `provider` query parameter is omitted (`oidc` or `openid`) |
 | `OIDC_PROVIDER_URL` | - | OIDC provider discovery URL |
 | `OIDC_CLIENT_ID` | - | OAuth2 client ID |
 | `OIDC_CLIENT_SECRET` | - | OAuth2 client secret |
 | `OIDC_REDIRECT_URL` | `http://localhost:8080/auth/callback` | OAuth2 redirect URI |
+| `OIDC_TENANT_CLAIM` | `tenant` | OIDC ID token claim name mapped to normalized `tenant` claim |
 | `UBUNTU_ONE_OPENID_URL` | `https://login.ubuntu.com/+openid` | Ubuntu One OpenID 2.0 endpoint |
 | `UBUNTU_ONE_REALM` | `http://localhost:8080` | OpenID trust realm matching service URL |
 | `ALLOWED_RETURN_TO_HOSTS` | - | Comma-separated list of additional trusted hosts allowed for `return_to` redirection |
