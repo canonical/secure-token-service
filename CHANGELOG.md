@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.1.0](https://github.com/canonical/secure-token-service/compare/v1.0.1...v1.1.0) (2026-11-25)
+
+
+### Features
+
+* **auth:** normalize OIDC/OpenID claims and unify session expiry ([a625436](https://github.com/canonical/secure-token-service/commit/a62543663c213b50141b8a85a903ec569c9fe775))
+* **harness:** configure native omp c1..c8 harness surfaces ([43bfd9c](https://github.com/canonical/secure-token-service/commit/43bfd9c70fc757119d94628ef1c9f08fc1110bbf))
+* **harness:** extract reusable OpenSpec validators and harness2 toolkit for multi-repo adoption ([#75](https://github.com/canonical/secure-token-service/issues/75)) ([c1877b5](https://github.com/canonical/secure-token-service/commit/c1877b5e5c8022e16db0e144822be5060b0ae98a))
+* **harness:** onboard Google harness2 OpenSpec integration and validators ([ce52f8a](https://github.com/canonical/secure-token-service/commit/ce52f8a99653e435848a694306dc463a5da44eb9))
+* **http:** add /auth/me and /auth/sessions CRUD endpoints ([57490c1](https://github.com/canonical/secure-token-service/commit/57490c167eb469440a4597856b2f49b655ffa388))
+* **openspec:** externalize validators into config-driven manifests and shared package ([84fb299](https://github.com/canonical/secure-token-service/commit/84fb2993264f4bcaf41ab9ec1a5bf658ff48d9fc))
+* **session:** add per-user session listing and selective revocation ([271e646](https://github.com/canonical/secure-token-service/commit/271e646d4a32ef94293f6125eba37018b2ad0ed5))
+
+
+### Bug Fixes
+
+* **auth:** enforce registered JWT claim precedence in MintToken ([0286059](https://github.com/canonical/secure-token-service/commit/0286059bf57b9db1905c09e4bc5549f2faa5389b))
+* **auth:** enforce verified email-only UserID without fallbacks ([d0bcd1a](https://github.com/canonical/secure-token-service/commit/d0bcd1a5fc354bd366764777212521a7e9fea3fc))
+* **harness:** align openspec-harness CLI with identity-team[#162](https://github.com/canonical/secure-token-service/issues/162) and document onboarding ([f482595](https://github.com/canonical/secure-token-service/commit/f482595f80144faaba7d5fbbd15dc48c24262527))
+* **openspec:** resolve harness manifest references flagged by drift report ([e0711f4](https://github.com/canonical/secure-token-service/commit/e0711f48960f53b239c1e1f18e1f93be4cbf6a2e))
+
 ## [1.0.1](https://github.com/canonical/secure-token-service/compare/v1.0.0...v1.0.1) (2026-11-16)
 
 
