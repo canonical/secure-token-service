@@ -107,24 +107,44 @@ func (s *Server) ExchangeSession(ctx context.Context, req *stsv1.ExchangeRequest
 		return nil, status.Error(codes.NotFound, "session not found")
 	}
 
-	// Copy session claims, normalizing email: trimmed when a non-empty string,
-	// otherwise dropped so an unverified or malformed email is never re-exposed.
+	// Fail closed on malformed, legacy, or inconsistent session records.
+	if err := sess.ValidateIdentity(); err != nil {
+		s.logger(ctx).Warn("rejecting session with invalid identity contract", zap.Error(err))
+		return nil, status.Error(codes.Unauthenticated, "session requires re-authentication")
+	}
+
+	// Copy session claims, normalizing email and u1_sso_id (trimmed non-empty strings)
+	// and stripping legacy claimed_id. For OpenID 2.0 sessions, omit "sub" and pass an
+	// empty subject to MintToken so minted JWTs carry email and u1_sso_id without a
+	// synthetic sub.
+	isOpenID := strings.EqualFold(sess.Provider, "openid")
 	claims := make(map[string]interface{})
 	for k, v := range sess.Claims {
-		if k == "email" {
-			if emailVal, ok := v.(string); ok {
-				if trimmed := strings.TrimSpace(emailVal); trimmed != "" {
+		if k == "claimed_id" {
+			continue
+		}
+		if k == "email" || k == "u1_sso_id" {
+			if strVal, ok := v.(string); ok {
+				if trimmed := strings.TrimSpace(strVal); trimmed != "" {
 					claims[k] = trimmed
 				}
 			}
 			continue
 		}
+		if isOpenID && k == "sub" {
+			continue
+		}
 		claims[k] = v
+	}
+
+	subject := strings.TrimSpace(sess.UserID)
+	if isOpenID {
+		subject = ""
 	}
 
 	// Mint internal JWT
 	token, err := s.keyManager.MintToken(
-		sess.UserID,
+		subject,
 		s.jwtIssuer,
 		s.jwtAudience,
 		s.jwtExpiry,

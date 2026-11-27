@@ -6,10 +6,10 @@ Defines self-service HTTP endpoints (`GET /auth/sessions`, `DELETE /auth/session
 ## Requirements
 
 ### Requirement: Self-service active session listing
-When an authenticated user calls `GET /auth/sessions` with a valid `session_id` cookie, the system SHALL return `200 OK` with a JSON object listing all active sessions owned by that user. Each item SHALL contain only `session_id`, `provider`, `created_at`, `expires_at` (derived from active store TTL), and `is_current`, with `Cache-Control: no-store`, `Vary: Cookie`, and `X-Content-Type-Options: nosniff`.
+When an authenticated user calls `GET /auth/sessions` with a valid `session_id` cookie passing session identity validation, the system SHALL return `200 OK` listing active sessions indexed under the caller's provider-specific `UserID` (OIDC `sub` or OpenID short `u1_sso_id`). Each item SHALL contain only `session_id`, `provider`, `created_at`, `expires_at` (derived from store TTL), and `is_current`, with `Cache-Control: no-store`, `Vary: Cookie`, and `X-Content-Type-Options: nosniff`.
 
 #### Scenario: User lists multiple open sessions
-- **WHEN** a user with two active sessions sends `GET /auth/sessions` using session A's valid cookie
+- **WHEN** a user with two active OIDC sessions sends `GET /auth/sessions` using session A's valid cookie
 - **THEN** the system returns `200 OK` with both sessions containing `session_id`, `provider`, `created_at`, `expires_at`, and `is_current`
 - **THEN** session A has `is_current: true`, session B has `is_current: false`, and no upstream tokens or other users' sessions appear
 
@@ -18,8 +18,8 @@ When an authenticated user calls `GET /auth/sessions` with a valid `session_id` 
 - **THEN** the system omits the expired session from the `GET /auth/sessions` response
 - **THEN** the system removes the stale session ID from the user's session index
 
-#### Scenario: Unauthenticated session listing
-- **WHEN** a client sends `GET /auth/sessions` without a valid active `session_id` cookie
+#### Scenario: Unauthenticated or invalid-identity session listing
+- **WHEN** a client sends `GET /auth/sessions` without a valid active `session_id` cookie or with a legacy/inconsistent session failing identity validation
 - **THEN** the system returns `401 Unauthorized` with a JSON error response
 
 #### Scenario: Session store unavailable during listing
@@ -85,13 +85,13 @@ Before processing state-changing cookie routes (`POST /auth/logout`, `DELETE /au
 - **WHEN** a CLI client sends `DELETE /auth/sessions/{id}` with a valid `session_id` cookie and neither `Sec-Fetch-Site` nor `Origin`
 - **THEN** the system allows the request to proceed
 
-### Requirement: Bounded route observability and backward compatibility
-The system SHALL record HTTP metrics for `/auth/sessions/{session_id}` using the parameterized route template instead of raw session IDs to avoid unbounded metric cardinality. Replacing the `501 Not Implemented` placeholder at `GET /auth/sessions` SHALL preserve existing `/auth/login`, same-origin/non-browser `POST /auth/logout`, and gRPC `RevokeUserSessions` behavior.
+### Requirement: Bounded route observability and session key contract
+The system SHALL record HTTP metrics for `/auth/sessions/{session_id}` using the parameterized route template instead of raw session IDs. Breaking change: sessions are indexed per provider by `UserID` (OIDC `sub` or OpenID short `u1_sso_id`), so `/auth/sessions*` and gRPC `RevokeUserSessions` operate on that provider-specific `UserID` rather than email, and invalid/legacy sessions SHALL be rejected with `401 Unauthorized`.
 
 #### Scenario: Single-session revocation emits parameterized route metric
 - **WHEN** a client calls `DELETE /auth/sessions/550e8400-e29b-41d4-a716-446655440000`
 - **THEN** HTTP server metrics record `http.route="/auth/sessions/{session_id}"` rather than the raw UUID path
 
-#### Scenario: Existing authentication and gRPC revocation contracts unchanged
-- **WHEN** the session CRUD endpoints are enabled
-- **THEN** same-origin browser and non-browser `POST /auth/logout` requests and gRPC `RevokeUserSessions` continue to operate with backward compatibility (while cross-origin browser `POST /auth/logout` requests are rejected with `403 Forbidden`)
+#### Scenario: Logout and gRPC revocation follow provider-specific UserID contract
+- **WHEN** session CRUD endpoints and gRPC `RevokeUserSessions` are invoked
+- **THEN** same-origin browser and non-browser `POST /auth/logout` requests succeed (cross-origin browser requests return `403 Forbidden`) and gRPC `RevokeUserSessions` revokes sessions indexed under the provided OIDC `sub` or OpenID short `u1_sso_id`

@@ -152,8 +152,9 @@ paths:
       summary: Ubuntu One OpenID 2.0 callback endpoint
       description: |
         Handles Ubuntu One OpenID 2.0 callback verification via direct check_authentication POST.
-        Extracts verified email user identity and attribute exchange claims, creates session,
-        and sets standardized session cookie.
+        Extracts short `u1_sso_id` from signed HTTPS `openid.claimed_id` (`/+id/<short_id>`),
+        signed `email`, and attribute exchange claims, creates a session indexed by `u1_sso_id`,
+        and sets a standardized session cookie.
       tags:
         - Authentication
       parameters:
@@ -163,12 +164,13 @@ paths:
           description: OpenID mode parameter (e.g. id_res or cancel)
           schema:
             type: string
-        - name: openid.identity
+        - name: openid.claimed_id
           in: query
-          required: false
-          description: Claimed identifier URL
+          required: true
+          description: Signed Ubuntu One claimed identifier URL (`https://<host>/+id/<short_id>`) from which short `u1_sso_id` is extracted
           schema:
             type: string
+            example: "https://login.ubuntu.com/+id/Xb6LTdm"
         - name: openid.return_to
           in: query
           required: false
@@ -554,7 +556,7 @@ paths:
       description: |
         Returns minimal public identity for the caller's active `session_id` cookie without exposing upstream tokens.
         Responses include `Cache-Control: no-store`, `Vary: Cookie`, and `X-Content-Type-Options: nosniff`.
-        The `tenant` field is populated from the configured `OIDC_TENANT_CLAIM` (default: `tenant`) when present.
+        The `tenant` and `u1_sso_id` fields are populated from `OIDC_TENANT_CLAIM` (default: `tenant`) and `OIDC_U1_SSO_ID_CLAIM` (default: `u1_sso_id`, short ID format without `/` or `:`, or extracted from signed `openid.claimed_id` for OpenID 2.0) when present. Breaking change: `user.id` is now the OIDC `sub` and is omitted for OpenID 2.0 sessions.
       tags:
         - Authentication
       security:
@@ -574,7 +576,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/MeResponse'
         '401':
-          description: Missing, invalid, expired, or revoked session
+          description: Missing, invalid, expired, revoked, or legacy/inconsistent session failing identity validation
           headers:
             Cache-Control:
               $ref: '#/components/headers/CacheControlNoStore'
@@ -741,16 +743,19 @@ components:
           $ref: '#/components/schemas/MeUser'
     MeUser:
       type: object
-      required:
-        - id
+      description: Minimal public user identity (breaking change — `id` is optional and omitted for OpenID 2.0 sessions)
       properties:
         id:
           type: string
-          description: Primary user identifier matching internal JWT sub (verified email)
-          example: "alice@canonical.com"
+          description: Primary user identifier matching internal JWT sub (OIDC sub; omitted for OpenID 2.0 sessions)
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         email:
           type: string
           example: "alice@canonical.com"
+        u1_sso_id:
+          type: string
+          description: Short Ubuntu One SSO identifier (extracted from signed openid.claimed_id `/+id/<short_id>`, or forwarded OIDC_U1_SSO_ID_CLAIM)
+          example: "Xb6LTdm"
         name:
           type: string
           example: "Alice Smith"

@@ -51,6 +51,11 @@ func TestExchangeSession(t *testing.T) {
 		Return(&session.Session{
 			SessionID: "session-123",
 			UserID:    "user-456",
+			Provider:  "oidc",
+			Claims: map[string]interface{}{
+				"sub":   "user-456",
+				"email": "user@example.com",
+			},
 		}, nil)
 
 	keyManager.EXPECT().
@@ -120,25 +125,28 @@ func TestExchangeSession_WithOpenIDClaims(t *testing.T) {
 		Get(ctx, "session-openid-123").
 		Return(&session.Session{
 			SessionID: "session-openid-123",
-			UserID:    "user@example.com",
+			UserID:    "Xb6LTdm",
 			Provider:  "openid",
 			Claims: map[string]interface{}{
+				"sub":          "spoofed-openid-sub",
+				"claimed_id":   "https://login.ubuntu.com/+id/Xb6LTdm",
 				"nickname":     "testuser",
 				"name":         "Test User",
-				"idp_provider": "ubuntuone",
+				"idp_provider": "openid",
 				"email":        "user@example.com",
+				"u1_sso_id":    "Xb6LTdm",
 			},
 		}, nil)
 
 	expectedClaims := map[string]interface{}{
 		"email":        "user@example.com",
+		"u1_sso_id":    "Xb6LTdm",
 		"nickname":     "testuser",
 		"name":         "Test User",
-		"idp_provider": "ubuntuone",
+		"idp_provider": "openid",
 	}
-
 	keyManager.EXPECT().
-		MintToken("user@example.com", "test-issuer", "test-audience", 3600, expectedClaims).
+		MintToken("", "test-issuer", "test-audience", 3600, expectedClaims).
 		Return("mock-jwt-token-openid", nil)
 
 	// Execute test
@@ -181,11 +189,12 @@ func TestExchangeSession_WithOIDCProfileAndTenantClaims(t *testing.T) {
 		Get(ctx, "session-oidc-123").
 		Return(&session.Session{
 			SessionID: "session-oidc-123",
-			UserID:    "alice@canonical.com",
+			UserID:    "oidc-sub-1",
 			Provider:  "oidc",
 			Claims: map[string]interface{}{
 				"sub":          "oidc-sub-1",
 				"email":        "alice@canonical.com",
+				"u1_sso_id":    "Xb6LTdm",
 				"name":         "Alice Smith",
 				"given_name":   "Alice",
 				"tenant":       "canonical",
@@ -196,6 +205,7 @@ func TestExchangeSession_WithOIDCProfileAndTenantClaims(t *testing.T) {
 	expectedClaims := map[string]interface{}{
 		"sub":          "oidc-sub-1",
 		"email":        "alice@canonical.com",
+		"u1_sso_id":    "Xb6LTdm",
 		"name":         "Alice Smith",
 		"given_name":   "Alice",
 		"tenant":       "canonical",
@@ -203,7 +213,7 @@ func TestExchangeSession_WithOIDCProfileAndTenantClaims(t *testing.T) {
 	}
 
 	keyManager.EXPECT().
-		MintToken("alice@canonical.com", "test-issuer", "test-audience", 3600, expectedClaims).
+		MintToken("oidc-sub-1", "test-issuer", "test-audience", 3600, expectedClaims).
 		Return("mock-jwt-token-oidc", nil)
 
 	resp, err := server.ExchangeSession(ctx, &stsv1.ExchangeRequest{
@@ -236,26 +246,27 @@ func TestExchangeSession_OmitsEmailWhenNoEmailPresent(t *testing.T) {
 		Get(ctx, "session-unverified-123").
 		Return(&session.Session{
 			SessionID: "session-unverified-123",
-			UserID:    "unverified@upn.example.com",
+			UserID:    "oidc-sub-999",
 			Provider:  "oidc",
 			Claims: map[string]interface{}{
-				"email":        "   ",
+				"email":        "alice@canonical.com",
+				"u1_sso_id":    "   ",
 				"sub":          "oidc-sub-999",
-				"name":         "No Email User",
+				"name":         "No U1 User",
 				"idp_provider": "oidc",
 			},
 		}, nil)
 
 	expectedClaims := map[string]interface{}{
 		"sub":          "oidc-sub-999",
-		"name":         "No Email User",
+		"email":        "alice@canonical.com",
+		"name":         "No U1 User",
 		"idp_provider": "oidc",
 	}
 
 	keyManager.EXPECT().
-		MintToken("unverified@upn.example.com", "test-issuer", "test-audience", 3600, expectedClaims).
+		MintToken("oidc-sub-999", "test-issuer", "test-audience", 3600, expectedClaims).
 		Return("mock-jwt-token-no-email", nil)
-
 	resp, err := server.ExchangeSession(ctx, &stsv1.ExchangeRequest{
 		SessionCookie: "unverified-cookie",
 	})
@@ -264,6 +275,120 @@ func TestExchangeSession_OmitsEmailWhenNoEmailPresent(t *testing.T) {
 	}
 	if resp.AccessToken != "mock-jwt-token-no-email" {
 		t.Errorf("Expected token 'mock-jwt-token-no-email', got: %s", resp.AccessToken)
+	}
+}
+
+func TestExchangeSession_RejectsLegacyAndInconsistentSessions(t *testing.T) {
+	tests := []struct {
+		name string
+		sess *session.Session
+	}{
+		{
+			name: "legacy OpenID session without u1_sso_id",
+			sess: &session.Session{
+				SessionID: "legacy-openid",
+				UserID:    "alice@canonical.com",
+				Provider:  "openid",
+				Claims: map[string]interface{}{
+					"email":      "alice@canonical.com",
+					"claimed_id": "https://login.ubuntu.com/+id/Xb6LTdm",
+				},
+			},
+		},
+		{
+			name: "OpenID session with blank u1_sso_id",
+			sess: &session.Session{
+				SessionID: "blank-u1",
+				UserID:    "https://login.ubuntu.com/+id/Xb6LTdm",
+				Provider:  "openid",
+				Claims: map[string]interface{}{
+					"email":     "alice@canonical.com",
+					"u1_sso_id": "   ",
+				},
+			},
+		},
+		{
+			name: "legacy OIDC session with email UserID and distinct sub claim",
+			sess: &session.Session{
+				SessionID: "legacy-oidc",
+				UserID:    "alice@canonical.com",
+				Provider:  "oidc",
+				Claims: map[string]interface{}{
+					"sub":   "oidc-sub-1",
+					"email": "alice@canonical.com",
+				},
+			},
+		},
+		{
+			name: "non-OpenID session with empty UserID",
+			sess: &session.Session{
+				SessionID: "empty-uid",
+				UserID:    "   ",
+				Provider:  "oidc",
+				Claims: map[string]interface{}{
+					"email": "alice@canonical.com",
+				},
+			},
+		},
+		{
+			name: "claimless legacy OIDC session rejected",
+			sess: &session.Session{
+				SessionID: "legacy-claimless-oidc",
+				UserID:    "alice@canonical.com",
+				Provider:  "oidc",
+			},
+		},
+		{
+			name: "empty provider session rejected",
+			sess: &session.Session{
+				SessionID: "empty-provider",
+				UserID:    "user-1",
+			},
+		},
+		{
+			name: "OpenID session with full URL u1_sso_id rejected",
+			sess: &session.Session{
+				SessionID: "url-u1-openid",
+				UserID:    "https://login.ubuntu.com/+id/Xb6LTdm",
+				Provider:  "openid",
+				Claims: map[string]interface{}{
+					"email":     "alice@canonical.com",
+					"u1_sso_id": "https://login.ubuntu.com/+id/Xb6LTdm",
+				},
+			},
+		},
+		{
+			name: "OIDC session with whitespace email rejected",
+			sess: &session.Session{
+				SessionID: "blank-email-oidc",
+				UserID:    "oidc-sub-999",
+				Provider:  "oidc",
+				Claims: map[string]interface{}{
+					"sub":   "oidc-sub-999",
+					"email": "   ",
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			cookieManager := NewMockCookieManager(ctrl)
+			sessionStore := NewMockSessionStore(ctrl)
+			keyManager := NewMockKeyManager(ctrl)
+			server := NewServer(sessionStore, keyManager, cookieManager, "test-issuer", "test-audience", 3600, nil)
+
+			cookieManager.EXPECT().Decode("session_id", "cookie-val", gomock.Any()).Return(tc.sess.SessionID, nil)
+			sessionStore.EXPECT().Get(gomock.Any(), tc.sess.SessionID).Return(tc.sess, nil)
+
+			_, err := server.ExchangeSession(context.Background(), &stsv1.ExchangeRequest{SessionCookie: "cookie-val"})
+			if status.Code(err) != codes.Unauthenticated {
+				t.Fatalf("status = %v, want Unauthenticated", status.Code(err))
+			}
+		})
 	}
 }
 

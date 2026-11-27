@@ -36,7 +36,7 @@ The `/auth/openid/callback` endpoint SHALL be dedicated to verifying Ubuntu One 
 #### Scenario: Successful Ubuntu One callback verification
 - **WHEN** the browser returns to `/auth/openid/callback` with valid OpenID 2.0 response parameters and a valid state cookie indicating `provider: "openid"`
 - **THEN** the system sends a direct `check_authentication` request to Ubuntu One
-- **THEN** upon receiving `is_valid:true`, the system creates a user session with `UserID` matching the user's verified email and redirects to the safe `return_to` URL
+- **THEN** upon receiving `is_valid:true`, the system extracts the short `u1_sso_id` from signed `openid.claimed_id` (`https://<host>/+id/<short_id>`), creates a user session indexed by that short `u1_sso_id` alongside signed `email` (breaking change from email-keyed sessions), and redirects to the safe `return_to` URL
 
 #### Scenario: User cancellation or authentication failure at Ubuntu One
 - **WHEN** Ubuntu One returns an OpenID cancellation (`openid.mode=cancel`) or invalid signature to `/auth/openid/callback`

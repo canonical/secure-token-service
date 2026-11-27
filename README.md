@@ -379,6 +379,7 @@ CREATE INDEX hydra_jwk_kid_idx ON hydra_jwk USING GIN (keydata);
 | `OIDC_CLIENT_SECRET` | - | OAuth2 client secret |
 | `OIDC_REDIRECT_URL` | `http://localhost:8080/auth/callback` | OAuth2 redirect URI |
 | `OIDC_TENANT_CLAIM` | `tenant` | OIDC ID token claim name mapped to normalized `tenant` claim |
+| `OIDC_U1_SSO_ID_CLAIM` | `u1_sso_id` | OIDC ID token claim name mapped to normalized `u1_sso_id` claim |
 | `UBUNTU_ONE_OPENID_URL` | `https://login.ubuntu.com/+openid` | Ubuntu One OpenID 2.0 endpoint |
 | `UBUNTU_ONE_REALM` | `http://localhost:8080` | OpenID trust realm matching service URL |
 | `ALLOWED_RETURN_TO_HOSTS` | - | Comma-separated list of additional trusted hosts allowed for `return_to` redirection |
@@ -1120,18 +1121,21 @@ message ExchangeResponse {
 }
 ```
 
-**JWT Claims**:
+**JWT Claims (OIDC session — `u1_sso_id` optional)**:
 ```json
 {
   "iss": "session-service",
-  "sub": "user-uuid",
+  "sub": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "aud": "internal-services",
   "iat": 1612137600,
   "exp": 1612141200,
   "email": "user@example.com",
-  "upstream_token": "..."
+  "u1_sso_id": "Xb6LTdm",
+  "idp_provider": "oidc"
 }
 ```
+
+*(Ubuntu One OpenID 2.0 sessions omit `sub` and populate `email` and short `u1_sso_id` extracted from signed `openid.claimed_id`.)*
 
 #### ExchangeToken
 

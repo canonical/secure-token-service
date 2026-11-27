@@ -45,6 +45,7 @@ type Config struct {
 	OIDCRedirectURL      string   `envconfig:"OIDC_REDIRECT_URL" required:"true"`
 	OIDCScopes           []string `envconfig:"OIDC_SCOPES" default:"openid,profile,email,offline_access"`
 	OIDCTenantClaim      string   `envconfig:"OIDC_TENANT_CLAIM" default:"tenant"`
+	OIDCU1SSOIDClaim     string   `envconfig:"OIDC_U1_SSO_ID_CLAIM" default:"u1_sso_id"`
 	AllowedReturnToHosts []string `envconfig:"ALLOWED_RETURN_TO_HOSTS" default:""`
 
 	// Ubuntu One OpenID Configuration

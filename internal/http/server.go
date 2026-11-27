@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/canonical/secure-token-service/internal/auth/openid"
 	"github.com/canonical/secure-token-service/internal/constants"
 	"github.com/canonical/secure-token-service/internal/cookie"
 	"github.com/canonical/secure-token-service/internal/observability"
@@ -76,6 +77,13 @@ func WithTenantClaim(claim string) ServerOption {
 	}
 }
 
+// WithU1SSOIDClaim sets the OIDC ID token claim name mapped to the normalized "u1_sso_id" claim.
+func WithU1SSOIDClaim(claim string) ServerOption {
+	return func(s *Server) {
+		s.u1SSOIDClaim = strings.TrimSpace(claim)
+	}
+}
+
 // Server handles HTTP endpoints for OIDC flow, OpenID flow, and JWKS.
 type Server struct {
 	sessionStore    session.Store
@@ -85,6 +93,7 @@ type Server struct {
 	openIDProvider  OpenIDProvider
 	defaultProvider string
 	tenantClaim     string
+	u1SSOIDClaim    string
 	sessionExpiry   time.Duration
 	observability   *observability.Observability
 	allowedHosts    []string
@@ -95,6 +104,7 @@ type Server struct {
 const (
 	defaultAuthProvider = "oidc"
 	defaultTenantClaim  = "tenant"
+	defaultU1SSOIDClaim = "u1_sso_id"
 )
 
 // sessionLifetime returns the configured session lifetime, or the default when unset.
@@ -134,6 +144,7 @@ func NewServer(store session.Store, km KeyManager, cm AuthCookieManager, provide
 		oidcProvider:    provider,
 		defaultProvider: defaultAuthProvider,
 		tenantClaim:     defaultTenantClaim,
+		u1SSOIDClaim:    defaultU1SSOIDClaim,
 		observability:   obs,
 		csrfProtection:  csrf,
 	}
@@ -499,7 +510,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	normalizedClaims, userID := s.normalizeOIDCClaims(r.Context(), rawClaims)
 	if userID == "" {
-		s.logger(r.Context()).Warn("rejecting OIDC callback without verified email UserID")
+		s.logger(r.Context()).Warn("rejecting OIDC callback missing required sub or verified email")
 		http.Error(w, "Failed to extract user ID from ID Token", http.StatusInternalServerError)
 		return
 	}
@@ -765,7 +776,10 @@ func (s *Server) resolveCallerSession(r *http.Request) (string, *session.Session
 		s.logger(r.Context()).Error("failed to get caller session", zap.Error(err))
 		return "", nil, http.StatusServiceUnavailable, "session store unavailable"
 	}
-	if sess == nil {
+	if err := sess.ValidateIdentity(); err != nil {
+		s.logger(r.Context()).Warn("rejecting session with invalid identity contract",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 		return "", nil, http.StatusUnauthorized, "unauthorized"
 	}
 
@@ -912,10 +926,11 @@ type meResponse struct {
 }
 
 type meUser struct {
-	ID     string `json:"id"`
-	Email  string `json:"email,omitempty"`
-	Name   string `json:"name,omitempty"`
-	Tenant string `json:"tenant,omitempty"`
+	ID      string `json:"id,omitempty"`
+	Email   string `json:"email,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Tenant  string `json:"tenant,omitempty"`
+	U1SSOID string `json:"u1_sso_id,omitempty"`
 }
 
 func (s *Server) effectiveTenantClaim() string {
@@ -923,6 +938,13 @@ func (s *Server) effectiveTenantClaim() string {
 		return s.tenantClaim
 	}
 	return defaultTenantClaim
+}
+
+func (s *Server) effectiveU1SSOIDClaim() string {
+	if s.u1SSOIDClaim != "" {
+		return s.u1SSOIDClaim
+	}
+	return defaultU1SSOIDClaim
 }
 
 func stringClaim(raw map[string]interface{}, key string) string {
@@ -941,14 +963,12 @@ func (s *Server) normalizeOIDCClaims(ctx context.Context, raw map[string]interfa
 
 	sub := stringClaim(raw, "sub")
 	email := stringClaim(raw, "email")
-	// Verify email_verified before promoting email to UserID or normalized claims.
+	// Verify email_verified before promoting email to normalized claims or
+	// allowing session creation.
 	//
-	// Why: Session.UserID is the authorization key for `user_sessions:<UserID>` in
-	// GET/DELETE /auth/sessions and the primary `sub` in ExchangeSession JWTs.
-	// Trusting an unverified OIDC email claim (`email_verified: false`) would allow
-	// account/session squatting: an attacker with an unverified email matching a
-	// victim's address could list or revoke the victim's sessions and mint internal
-	// JWTs with the victim's identity.
+	// Why: downstream services and authorization alias rules rely on the minted
+	// `email` claim being verified. Trusting an unverified OIDC email claim
+	// (`email_verified: false`) would allow account/alias spoofing.
 	//
 	// Policy:
 	// - When `email_verified` is present, accept boolean `true` or case-insensitive
@@ -1010,11 +1030,29 @@ func (s *Server) normalizeOIDCClaims(ctx context.Context, raw map[string]interfa
 		}
 	}
 
+	u1Key := s.effectiveU1SSOIDClaim()
+	if rawVal, exists := raw[u1Key]; exists {
+		if u1Str, ok := rawVal.(string); ok {
+			if trimmed := strings.TrimSpace(u1Str); trimmed != "" {
+				if openid.IsValidU1SSOID(trimmed) {
+					claims["u1_sso_id"] = trimmed
+				} else {
+					s.logger(ctx).Warn("ignoring invalid OIDC u1_sso_id claim", zap.String("claim", u1Key))
+				}
+			}
+		} else if rawVal != nil {
+			s.logger(ctx).Debug("ignoring non-string OIDC u1_sso_id claim", zap.String("claim", u1Key))
+		}
+	}
+
 	claims["idp_provider"] = "oidc"
 
-	// Resolve OIDC UserID strictly from verified email with no runtime fallback
-	// to `sub`, `nickname`, or `preferred_username`.
-	return claims, email
+	// Resolve OIDC UserID strictly from `sub` while still requiring a verified
+	// `email`, failing closed with no fallback when either is absent.
+	if sub == "" || email == "" {
+		return claims, ""
+	}
+	return claims, sub
 }
 
 func writeMeJSON(w http.ResponseWriter, statusCode int, payload interface{}) {
@@ -1038,8 +1076,10 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user := &meUser{
-		ID: sess.UserID,
+	isOpenID := strings.EqualFold(sess.Provider, "openid")
+	user := &meUser{}
+	if !isOpenID {
+		user.ID = strings.TrimSpace(sess.UserID)
 	}
 	if email := stringClaim(sess.Claims, "email"); email != "" {
 		user.Email = email
@@ -1050,7 +1090,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	if tenant := stringClaim(sess.Claims, "tenant"); tenant != "" {
 		user.Tenant = tenant
 	}
-
+	if u1SSOID := stringClaim(sess.Claims, "u1_sso_id"); u1SSOID != "" {
+		user.U1SSOID = u1SSOID
+	}
 	writeMeJSON(w, http.StatusOK, meResponse{
 		Authenticated: true,
 		User:          user,

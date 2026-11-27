@@ -188,6 +188,10 @@ func extendOneSession(
 	if sess.RefreshToken == "" {
 		return "skipped", nil
 	}
+	if err := sess.ValidateIdentity(); err != nil {
+		return "", fmt.Errorf("invalid session identity: %w", err)
+	}
+
 
 	if dryRun {
 		return fmt.Sprintf("would refresh (dry-run, ttl=%s)", ttl), nil

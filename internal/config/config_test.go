@@ -117,6 +117,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.OIDCTenantClaim != "tenant" {
 		t.Errorf("OIDCTenantClaim = %s, want tenant", cfg.OIDCTenantClaim)
 	}
+	if cfg.OIDCU1SSOIDClaim != "u1_sso_id" {
+		t.Errorf("OIDCU1SSOIDClaim = %s, want u1_sso_id", cfg.OIDCU1SSOIDClaim)
+	}
 }
 
 func TestLoad_CustomValues(t *testing.T) {
@@ -146,6 +149,7 @@ func TestLoad_CustomValues(t *testing.T) {
 	os.Setenv("UBUNTU_ONE_REALM", "https://app.example.com")
 	os.Setenv("DEFAULT_AUTH_PROVIDER", "openid")
 	os.Setenv("OIDC_TENANT_CLAIM", "org")
+	os.Setenv("OIDC_U1_SSO_ID_CLAIM", "canonical_u1_id")
 	defer func() {
 		os.Unsetenv("OIDC_PROVIDER_URL")
 		os.Unsetenv("OIDC_CLIENT_ID")
@@ -156,6 +160,7 @@ func TestLoad_CustomValues(t *testing.T) {
 		os.Unsetenv("UBUNTU_ONE_REALM")
 		os.Unsetenv("DEFAULT_AUTH_PROVIDER")
 		os.Unsetenv("OIDC_TENANT_CLAIM")
+		os.Unsetenv("OIDC_U1_SSO_ID_CLAIM")
 		os.Unsetenv("HTTP_PORT")
 		os.Unsetenv("GRPC_PORT")
 		os.Unsetenv("JWT_ISSUER")
@@ -238,6 +243,9 @@ func TestLoad_CustomValues(t *testing.T) {
 	}
 	if cfg.OIDCTenantClaim != "org" {
 		t.Errorf("OIDCTenantClaim = %s, want org", cfg.OIDCTenantClaim)
+	}
+	if cfg.OIDCU1SSOIDClaim != "canonical_u1_id" {
+		t.Errorf("OIDCU1SSOIDClaim = %s, want canonical_u1_id", cfg.OIDCU1SSOIDClaim)
 	}
 }
 
