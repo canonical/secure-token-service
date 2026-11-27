@@ -713,3 +713,149 @@ func TestValkeyStoreUnit_ListUserSessions_SkipsMalformedPayload(t *testing.T) {
 		t.Fatalf("expected only [sess-good], got %+v", sessions)
 	}
 }
+
+func TestSession_ValidateIdentity(t *testing.T) {
+	tests := []struct {
+		name    string
+		sess    *Session
+		wantErr bool
+	}{
+		{
+			name: "valid OIDC session without u1_sso_id",
+			sess: &Session{
+				UserID:   "oidc-sub-1",
+				Provider: "oidc",
+				Claims: map[string]interface{}{
+					"sub":   "oidc-sub-1",
+					"email": "alice@canonical.com",
+				},
+			},
+		},
+		{
+			name: "valid OIDC session with short u1_sso_id",
+			sess: &Session{
+				UserID:   "oidc-sub-1",
+				Provider: "oidc",
+				Claims: map[string]interface{}{
+					"sub":       "oidc-sub-1",
+					"email":     "alice@canonical.com",
+					"u1_sso_id": "Xb6LTdm",
+				},
+			},
+		},
+		{
+			name: "valid OpenID session with short u1_sso_id",
+			sess: &Session{
+				UserID:   "Xb6LTdm",
+				Provider: "openid",
+				Claims: map[string]interface{}{
+					"email":     "alice@canonical.com",
+					"u1_sso_id": "Xb6LTdm",
+				},
+			},
+		},
+		{
+			name:    "nil session rejected",
+			sess:    nil,
+			wantErr: true,
+		},
+		{
+			name: "empty provider rejected",
+			sess: &Session{
+				UserID: "oidc-sub-1",
+				Claims: map[string]interface{}{"sub": "oidc-sub-1", "email": "a@b.com"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "claimless legacy OIDC session rejected",
+			sess: &Session{
+				UserID:   "alice@canonical.com",
+				Provider: "oidc",
+			},
+			wantErr: true,
+		},
+		{
+			name: "OIDC session with mismatched sub rejected",
+			sess: &Session{
+				UserID:   "alice@canonical.com",
+				Provider: "oidc",
+				Claims:   map[string]interface{}{"sub": "oidc-sub-1", "email": "alice@canonical.com"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "OIDC session missing email rejected",
+			sess: &Session{
+				UserID:   "oidc-sub-1",
+				Provider: "oidc",
+				Claims:   map[string]interface{}{"sub": "oidc-sub-1"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "OIDC session with URL u1_sso_id rejected",
+			sess: &Session{
+				UserID:   "oidc-sub-1",
+				Provider: "oidc",
+				Claims: map[string]interface{}{
+					"sub":       "oidc-sub-1",
+					"email":     "alice@canonical.com",
+					"u1_sso_id": "https://login.ubuntu.com/+id/Xb6LTdm",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "OpenID session with URL u1_sso_id rejected",
+			sess: &Session{
+				UserID:   "https://login.ubuntu.com/+id/Xb6LTdm",
+				Provider: "openid",
+				Claims: map[string]interface{}{
+					"email":     "alice@canonical.com",
+					"u1_sso_id": "https://login.ubuntu.com/+id/Xb6LTdm",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "OpenID session missing email rejected",
+			sess: &Session{
+				UserID:   "Xb6LTdm",
+				Provider: "openid",
+				Claims:   map[string]interface{}{"u1_sso_id": "Xb6LTdm"},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.sess.ValidateIdentity()
+			if tc.wantErr && err == nil {
+				t.Fatal("expected ValidateIdentity error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected ValidateIdentity error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValkeyStoreUnit_RejectsEmptyUserID(t *testing.T) {
+	_, store := startFakeValkeyServer(t)
+	ctx := context.Background()
+
+	if err := store.Set(ctx, &Session{SessionID: "s1", UserID: "   "}); err == nil {
+		t.Error("Set accepted blank UserID")
+	}
+	if err := store.DeleteUserSession(ctx, " ", "s1"); err == nil {
+		t.Error("DeleteUserSession accepted blank userID")
+	}
+	if _, err := store.ListUserSessions(ctx, ""); err == nil {
+		t.Error("ListUserSessions accepted empty userID")
+	}
+	if _, err := store.RevokeUserSessionsExcept(ctx, "\t", ""); err == nil {
+		t.Error("RevokeUserSessionsExcept accepted whitespace userID")
+	}
+}

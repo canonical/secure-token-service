@@ -94,21 +94,69 @@ type Claims struct {
 	Raw       map[string]interface{} `json:"raw,omitempty"`
 }
 
-// UserID resolves the user identifier strictly from signed Email with no fallback
-// to Nickname or ClaimedID, failing closed when Email is absent.
-func (c *Claims) UserID() (string, error) {
-	if email := strings.TrimSpace(c.Email); email != "" {
-		return email, nil
+// IsValidU1SSOID reports whether id is a valid short Ubuntu One SSO identifier
+// suitable for use as a normalized u1_sso_id claim and OpenFGA object identifier
+// (non-empty, <= 128 printable non-whitespace ASCII characters, containing no '/' or ':').
+func IsValidU1SSOID(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
 	}
-	return "", errors.New("missing email in OpenID response")
+	for i := range len(id) {
+		c := id[i]
+		if c <= 0x20 || c >= 0x7f || c == '/' || c == ':' {
+			return false
+		}
+	}
+	return true
+}
+
+// ExtractU1SSOID extracts and validates the short Ubuntu One SSO identifier from
+// a signed openid.claimed_id URL of the form "https://<host>/+id/<short_id>".
+func ExtractU1SSOID(claimedID string) (string, error) {
+	trimmed := strings.TrimSpace(claimedID)
+	if trimmed == "" || trimmed == OpenIDIdentifierSelect {
+		return "", errors.New("missing claimed_id in OpenID response")
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
+		return "", errors.New("invalid claimed_id URL in OpenID response")
+	}
+	const idPrefix = "/+id/"
+	if !strings.HasPrefix(u.Path, idPrefix) {
+		return "", errors.New("claimed_id missing /+id/ prefix in OpenID response")
+	}
+	shortID := strings.TrimPrefix(u.Path, idPrefix)
+	if !IsValidU1SSOID(shortID) {
+		return "", errors.New("invalid u1_sso_id in OpenID claimed_id")
+	}
+	return shortID, nil
+}
+
+// U1SSOID returns the short Ubuntu One SSO identifier extracted from ClaimedID.
+func (c *Claims) U1SSOID() (string, error) {
+	return ExtractU1SSOID(c.ClaimedID)
+}
+
+// UserID resolves the session user identifier strictly from the short U1SSO ID
+// extracted from signed ClaimedID ("https://<host>/+id/<short_id>") and requires
+// a signed Email, failing closed without fallback when either is absent or invalid.
+func (c *Claims) UserID() (string, error) {
+	u1ID, err := c.U1SSOID()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(c.Email) == "" {
+		return "", errors.New("missing email in OpenID response")
+	}
+	return u1ID, nil
 }
 
 // NormalizedClaims returns a map of normalized claims suitable for storing in a session
 // and minting into internal JWTs.
 func (c *Claims) NormalizedClaims() map[string]interface{} {
 	m := make(map[string]interface{})
-	if c.Email != "" {
-		m["email"] = c.Email
+	if email := strings.TrimSpace(c.Email); email != "" {
+		m["email"] = email
 	}
 	if c.Nickname != "" {
 		m["nickname"] = c.Nickname
@@ -120,8 +168,8 @@ func (c *Claims) NormalizedClaims() map[string]interface{} {
 	if c.GivenName != "" {
 		m["given_name"] = c.GivenName
 	}
-	if c.ClaimedID != "" {
-		m["claimed_id"] = c.ClaimedID
+	if u1ID, err := c.U1SSOID(); err == nil {
+		m["u1_sso_id"] = u1ID
 	}
 	m["idp_provider"] = "openid"
 	return m
@@ -386,10 +434,8 @@ func ExtractClaims(q url.Values) *Claims {
 		return vals[0]
 	}
 
-	// 1. Claimed ID / Identity (must be signed)
-	if val := signedGet("openid.claimed_id"); val != "" {
-		claims.ClaimedID = val
-	} else if val := signedGet("openid.identity"); val != "" {
+	// 1. Claimed ID (must be signed; no fallback to openid.identity or identifier_select)
+	if val := strings.TrimSpace(signedGet("openid.claimed_id")); val != "" && val != OpenIDIdentifierSelect {
 		claims.ClaimedID = val
 	}
 

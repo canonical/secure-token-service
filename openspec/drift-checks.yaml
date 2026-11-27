@@ -93,22 +93,42 @@ checks:
         - provider
 
   claims-normalization:
-    - id: oidc_tenant_claim_config
+    - id: oidc_tenant_and_u1_sso_claim_config
       path: internal/config/config.go
       needles:
         - OIDCTenantClaim
         - OIDC_TENANT_CLAIM
+        - OIDCU1SSOIDClaim
+        - OIDC_U1_SSO_ID_CLAIM
     - id: oidc_email_verified_and_claims
       path: internal/http/server.go
       needles:
         - normalizeOIDCClaims
         - email_verified
+        - u1_sso_id
+    - id: openid_u1_sso_id_claim
+      path: internal/auth/openid/ubuntuone.go
+      needles:
+        - u1_sso_id
+        - ExtractU1SSOID
+        - IsValidU1SSOID
+    - id: grpc_exchange_session_token_format
+      path: internal/grpc/server.go
+      needles:
+        - u1_sso_id
+        - ValidateIdentity
+        - strings.EqualFold(sess.Provider, "openid")
+    - id: session_identity_validation
+      path: internal/session/store.go
+      needles:
+        - ValidateIdentity
+        - ErrInvalidSessionIdentity
     - id: session_extend_unified_expiry
       path: cmd/sts/extend_sessions.go
       needles:
         - extendOneSession
+        - ValidateIdentity
         - time.Now().UTC().Add(ttl)
-
   session-whoami:
     - id: http_me_route_and_headers
       path: internal/http/server.go
@@ -118,12 +138,13 @@ checks:
         - Cache-Control
         - no-store
         - normalizeOIDCClaims
+        - u1_sso_id
     - id: openapi_me_contract
       path: docs/api/openapi.yaml
       needles:
         - /auth/me
         - MeResponse
-
+        - u1_sso_id
   session-management:
     - id: valkey_session_crud_methods
       path: internal/session/store.go

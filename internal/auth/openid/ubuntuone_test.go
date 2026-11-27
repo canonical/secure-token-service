@@ -203,13 +203,19 @@ func TestVerifyCallback_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UserID() failed: %v", err)
 	}
-	if userID != "alice@canonical.com" {
-		t.Errorf("resolved UserID: got %q, want alice@canonical.com", userID)
+	if userID != "user123" {
+		t.Errorf("resolved UserID: got %q, want user123", userID)
 	}
 
 	norm := claims.NormalizedClaims()
 	if norm["email"] != "alice@canonical.com" {
 		t.Errorf("norm[email]: got %v, want alice@canonical.com", norm["email"])
+	}
+	if norm["u1_sso_id"] != "user123" {
+		t.Errorf("norm[u1_sso_id]: got %v, want user123", norm["u1_sso_id"])
+	}
+	if _, hasLegacy := norm["claimed_id"]; hasLegacy {
+		t.Errorf("norm[claimed_id]: expected legacy claimed_id claim to be omitted, got %v", norm["claimed_id"])
 	}
 	if norm["nickname"] != "alice" {
 		t.Errorf("norm[nickname]: got %v, want alice", norm["nickname"])
@@ -314,16 +320,19 @@ func TestVerifyCallback_SREGResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UserID() failed: %v", err)
 	}
-	if userID != "canonical-user@canonical.com" {
-		t.Errorf("UserID: got %q, want canonical-user@canonical.com", userID)
+	if userID != "Xb6LTdm" {
+		t.Errorf("UserID: got %q, want Xb6LTdm", userID)
 	}
 
 	norm := claims.NormalizedClaims()
 	if norm["email"] != "canonical-user@canonical.com" {
 		t.Errorf("norm[email]: got %v, want canonical-user@canonical.com", norm["email"])
 	}
-	if norm["claimed_id"] != "https://sso.iam.test.canonical.com/+id/Xb6LTdm" {
-		t.Errorf("norm[claimed_id]: got %v, want https://sso.iam.test.canonical.com/+id/Xb6LTdm", norm["claimed_id"])
+	if norm["u1_sso_id"] != "Xb6LTdm" {
+		t.Errorf("norm[u1_sso_id]: got %v, want Xb6LTdm", norm["u1_sso_id"])
+	}
+	if _, hasLegacy := norm["claimed_id"]; hasLegacy {
+		t.Errorf("norm[claimed_id]: expected legacy claimed_id claim to be omitted, got %v", norm["claimed_id"])
 	}
 	if norm["idp_provider"] != "openid" {
 		t.Errorf("norm[idp_provider]: got %v, want openid", norm["idp_provider"])
@@ -699,13 +708,13 @@ func TestClaims_UserID(t *testing.T) {
 		wantErr    bool
 	}{
 		{
-			name: "email returned when all claims present",
+			name: "short u1_sso_id returned when claimed_id and email are present",
 			claims: openid.Claims{
 				Email:     "user@canonical.com",
 				Nickname:  "user_nick",
 				ClaimedID: "https://login.ubuntu.com/+id/user123",
 			},
-			wantUserID: "user@canonical.com",
+			wantUserID: "user123",
 			wantErr:    false,
 		},
 		{
@@ -723,6 +732,60 @@ func TestClaims_UserID(t *testing.T) {
 				Email:     "   \t\n ",
 				Nickname:  "user_nick",
 				ClaimedID: "https://login.ubuntu.com/+id/user123",
+			},
+			wantUserID: "",
+			wantErr:    true,
+		},
+		{
+			name: "error when claimed_id absent despite email and nickname",
+			claims: openid.Claims{
+				Email:    "user@canonical.com",
+				Nickname: "user_nick",
+			},
+			wantUserID: "",
+			wantErr:    true,
+		},
+		{
+			name: "error when claimed_id is whitespace only",
+			claims: openid.Claims{
+				Email:     "user@canonical.com",
+				ClaimedID: "   \t\n ",
+			},
+			wantUserID: "",
+			wantErr:    true,
+		},
+		{
+			name: "error when claimed_id is identifier_select sentinel",
+			claims: openid.Claims{
+				Email:     "user@canonical.com",
+				ClaimedID: openid.OpenIDIdentifierSelect,
+			},
+			wantUserID: "",
+			wantErr:    true,
+		},
+		{
+			name: "error when claimed_id uses http instead of https",
+			claims: openid.Claims{
+				Email:     "user@canonical.com",
+				ClaimedID: "http://login.ubuntu.com/+id/user123",
+			},
+			wantUserID: "",
+			wantErr:    true,
+		},
+		{
+			name: "error when claimed_id misses /+id/ prefix",
+			claims: openid.Claims{
+				Email:     "user@canonical.com",
+				ClaimedID: "https://login.ubuntu.com/users/user123",
+			},
+			wantUserID: "",
+			wantErr:    true,
+		},
+		{
+			name: "error when claimed_id short id has extra path segment or colon",
+			claims: openid.Claims{
+				Email:     "user@canonical.com",
+				ClaimedID: "https://login.ubuntu.com/+id/bad:id",
 			},
 			wantUserID: "",
 			wantErr:    true,
@@ -752,6 +815,43 @@ func TestClaims_UserID(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExtractClaims_NoIdentityFallbackAndRejectsIdentifierSelect(t *testing.T) {
+	t.Run("signed identity without claimed_id does not populate ClaimedID", func(t *testing.T) {
+		q := url.Values{
+			"openid.identity":   {"https://login.ubuntu.com/+id/local-id"},
+			"openid.ns.sreg":    {openid.SREGNS},
+			"openid.sreg.email": {"alice@canonical.com"},
+			"openid.signed":     {"identity,ns.sreg,sreg.email"},
+		}
+		claims := openid.ExtractClaims(q)
+		if claims.ClaimedID != "" {
+			t.Errorf("ClaimedID = %q, want empty (no openid.identity fallback)", claims.ClaimedID)
+		}
+		if _, err := claims.UserID(); err == nil {
+			t.Error("expected UserID() to fail when claimed_id is absent")
+		}
+		if _, exists := claims.NormalizedClaims()["u1_sso_id"]; exists {
+			t.Error("expected u1_sso_id to be omitted when claimed_id is absent")
+		}
+	})
+
+	t.Run("identifier_select sentinel is ignored", func(t *testing.T) {
+		q := url.Values{
+			"openid.claimed_id": {openid.OpenIDIdentifierSelect},
+			"openid.ns.sreg":    {openid.SREGNS},
+			"openid.sreg.email": {"alice@canonical.com"},
+			"openid.signed":     {"claimed_id,ns.sreg,sreg.email"},
+		}
+		claims := openid.ExtractClaims(q)
+		if claims.ClaimedID != "" {
+			t.Errorf("ClaimedID = %q, want empty for identifier_select", claims.ClaimedID)
+		}
+		if _, err := claims.UserID(); err == nil {
+			t.Error("expected UserID() to fail for identifier_select")
+		}
+	})
 }
 
 func TestExtractClaims_SignedOnlyAndNoUnsignedFallback(t *testing.T) {

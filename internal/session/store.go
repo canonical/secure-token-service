@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/valkey-io/valkey-go"
@@ -16,6 +17,9 @@ import (
 
 // ErrSessionNotFound is returned when a requested session is not found in the store.
 var ErrSessionNotFound = errors.New("session not found")
+
+// ErrInvalidSessionIdentity is returned when a stored session fails identity contract validation.
+var ErrInvalidSessionIdentity = errors.New("invalid session identity")
 
 // Session represents a user session with upstream tokens.
 type Session struct {
@@ -28,6 +32,68 @@ type Session struct {
 	CreatedAt    time.Time              `json:"created_at"`
 	Provider     string                 `json:"provider,omitempty"`
 	Claims       map[string]interface{} `json:"claims,omitempty"`
+}
+
+func trimmedClaim(claims map[string]interface{}, key string) string {
+	if claims == nil {
+		return ""
+	}
+	val, ok := claims[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(val)
+}
+
+func isValidShortU1ID(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	for i := range len(id) {
+		c := id[i]
+		if c <= 0x20 || c >= 0x7f || c == '/' || c == ':' {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidateIdentity enforces the identity contract for stored sessions so
+// ExchangeSession, /auth/me, /auth/sessions*, and extend-sessions fail closed
+// uniformly on malformed, legacy, or inconsistent records.
+func (s *Session) ValidateIdentity() error {
+	if s == nil {
+		return ErrInvalidSessionIdentity
+	}
+	userID := strings.TrimSpace(s.UserID)
+	if userID == "" {
+		return fmt.Errorf("%w: empty user_id", ErrInvalidSessionIdentity)
+	}
+	switch strings.ToLower(strings.TrimSpace(s.Provider)) {
+	case "oidc":
+		sub := trimmedClaim(s.Claims, "sub")
+		if sub == "" || sub != userID {
+			return fmt.Errorf("%w: oidc session missing matching sub claim", ErrInvalidSessionIdentity)
+		}
+		if trimmedClaim(s.Claims, "email") == "" {
+			return fmt.Errorf("%w: oidc session missing email claim", ErrInvalidSessionIdentity)
+		}
+		if u1 := trimmedClaim(s.Claims, "u1_sso_id"); u1 != "" && !isValidShortU1ID(u1) {
+			return fmt.Errorf("%w: oidc session has invalid u1_sso_id", ErrInvalidSessionIdentity)
+		}
+		return nil
+	case "openid":
+		u1 := trimmedClaim(s.Claims, "u1_sso_id")
+		if u1 == "" || u1 != userID || !isValidShortU1ID(u1) {
+			return fmt.Errorf("%w: openid session missing valid matching u1_sso_id", ErrInvalidSessionIdentity)
+		}
+		if trimmedClaim(s.Claims, "email") == "" {
+			return fmt.Errorf("%w: openid session missing email claim", ErrInvalidSessionIdentity)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: unsupported provider %q", ErrInvalidSessionIdentity, s.Provider)
+	}
 }
 
 // SetOptions holds optional configuration for Store.Set.
@@ -111,6 +177,9 @@ func (s *ValkeyStore) Get(ctx context.Context, sessionID string) (*Session, erro
 
 // Set stores a session in Valkey.
 func (s *ValkeyStore) Set(ctx context.Context, session *Session, opts ...SetOption) error {
+	if session == nil || strings.TrimSpace(session.UserID) == "" {
+		return fmt.Errorf("failed to set session: user_id is required")
+	}
 	options := SetOptions{}
 	for _, opt := range opts {
 		opt(&options)
@@ -187,6 +256,9 @@ func (s *ValkeyStore) Delete(ctx context.Context, sessionID string) error {
 // Returns ErrSessionNotFound when the session does not exist, has already expired,
 // or belongs to another user.
 func (s *ValkeyStore) DeleteUserSession(ctx context.Context, userID, sessionID string) error {
+	if strings.TrimSpace(userID) == "" {
+		return fmt.Errorf("failed to check session ownership: user_id is required")
+	}
 	userSessionKey := fmt.Sprintf("user_sessions:%s", userID)
 
 	isMember, err := s.client.Do(ctx, s.client.B().Sismember().Key(userSessionKey).Member(sessionID).Build()).AsBool()
@@ -223,6 +295,9 @@ func (s *ValkeyStore) RevokeUserSessions(ctx context.Context, userID string) err
 // ListUserSessions returns all active sessions for a user with ExpiresAt derived
 // from each session's active Valkey TTL, lazily pruning expired IDs from the user set.
 func (s *ValkeyStore) ListUserSessions(ctx context.Context, userID string) ([]*Session, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, fmt.Errorf("failed to list user sessions: user_id is required")
+	}
 	userSessionKey := fmt.Sprintf("user_sessions:%s", userID)
 
 	sessionIDs, err := s.client.Do(ctx, s.client.B().Smembers().Key(userSessionKey).Build()).AsStrSlice()
@@ -288,6 +363,9 @@ func (s *ValkeyStore) ListUserSessions(ctx context.Context, userID string) ([]*S
 // user_sessions:<userID> via SREM so concurrent SADD calls are preserved (Valkey
 // auto-deletes the set when its last member is removed).
 func (s *ValkeyStore) RevokeUserSessionsExcept(ctx context.Context, userID, keepSessionID string) (int, error) {
+	if strings.TrimSpace(userID) == "" {
+		return 0, fmt.Errorf("failed to get user sessions: user_id is required")
+	}
 	userSessionKey := fmt.Sprintf("user_sessions:%s", userID)
 
 	sessionIDs, err := s.client.Do(ctx, s.client.B().Smembers().Key(userSessionKey).Build()).AsStrSlice()

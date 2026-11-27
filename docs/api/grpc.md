@@ -77,17 +77,30 @@ Exchanges an opaque session cookie for a signed internal JWT containing user ide
 - `access_token` (string): ES256-signed internal JWT with user claims
 - `expires_in` (int64): Seconds until JWT expiration
 
-**JWT Claims Example**:
+**JWT Claims Example (OIDC session — `u1_sso_id` optional, included when present in OIDC ID token)**:
 ```json
 {
-  "sub": "user-uuid-1234",
+  "sub": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "iss": "https://sts.example.com",
   "aud": "internal-services",
   "exp": 1234567890,
   "iat": 1234567800,
-  "jti": "jwt-uuid-5678",
-  "session_id": "session-uuid-abcd",
-  "email": "user@example.com"
+  "email": "user@example.com",
+  "u1_sso_id": "Xb6LTdm",
+  "idp_provider": "oidc"
+}
+```
+
+**JWT Claims Example (Ubuntu One OpenID 2.0 session — `sub` omitted)**:
+```json
+{
+  "iss": "https://sts.example.com",
+  "aud": "internal-services",
+  "exp": 1234567890,
+  "iat": 1234567800,
+  "email": "user@example.com",
+  "u1_sso_id": "Xb6LTdm",
+  "idp_provider": "openid"
 }
 ```
 
@@ -95,11 +108,10 @@ Exchanges an opaque session cookie for a signed internal JWT containing user ide
 
 | gRPC Status | Condition | Description |
 |-------------|-----------|-------------|
-| `INVALID_ARGUMENT` | Missing or empty `session_cookie` | Request validation failed |
-| `UNAUTHENTICATED` | Invalid cookie format | Cookie decoding failed |
+| `INVALID_ARGUMENT` | Missing, empty, or invalid `session_cookie` | Request or AEAD cookie decoding failed |
 | `NOT_FOUND` | Session not found | Session doesn't exist or expired |
+| `UNAUTHENTICATED` | Invalid, legacy, or inconsistent session identity | Session failed `ValidateIdentity()` (`session requires re-authentication`) |
 | `INTERNAL` | JWT minting failed | Internal error creating JWT |
-
 ---
 
 ## ExchangeToken RPC
@@ -163,6 +175,23 @@ Exchanges an upstream IdP access token (issued via OAuth2 client credentials gra
 | `UNAVAILABLE` | Upstream IdP JWKS endpoint unreachable or key set empty | Upstream service error |
 | `UNIMPLEMENTED` | Token verifier not configured on STS server | Service configuration error |
 | `INTERNAL` | Internal ES256 key manager failure | Server internal error |
+
+---
+
+## RevokeUserSessions RPC
+
+### Purpose
+Invalidates all active sessions indexed under a provider-specific `user_id` in Valkey.
+
+### Request
+```json
+{
+  "user_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+}
+```
+
+**Fields**:
+- `user_id` (string, required): Provider-specific session index key — the OIDC `sub` for OIDC sessions, or the short `u1_sso_id` (e.g., `Xb6LTdm`) for Ubuntu One OpenID 2.0 sessions. *(Breaking change from email-keyed revocation.)*
 
 ---
 

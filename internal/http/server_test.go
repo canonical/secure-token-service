@@ -701,6 +701,7 @@ func setupCallbackSuccessMocks(
 			claimsPtr, ok := v.(*map[string]interface{})
 			if ok {
 				*claimsPtr = map[string]interface{}{
+					"sub":   "oidc-sub-123",
 					"email": "user@example.com",
 				}
 			}
@@ -758,6 +759,7 @@ func TestHandleCallback_CookieExpiryUsesSessionLifetime(t *testing.T) {
 		claimsPtr, ok := v.(*map[string]interface{})
 		if ok {
 			*claimsPtr = map[string]interface{}{
+				"sub":   "oidc-sub-123",
 				"email": "user@example.com",
 			}
 		}
@@ -1087,9 +1089,12 @@ func TestHandleOpenIDCallback(t *testing.T) {
 				if !ok {
 					return false
 				}
-				return s.UserID == "testuser@example.com" &&
+				_, hasLegacyClaimedID := s.Claims["claimed_id"]
+				return s.UserID == "user123" &&
 					s.Provider == "openid" &&
 					s.Claims["email"] == "testuser@example.com" &&
+					s.Claims["u1_sso_id"] == "user123" &&
+					!hasLegacyClaimedID &&
 					s.Claims["name"] == "Test User"
 			})).
 			Return(nil)
@@ -1343,6 +1348,77 @@ func TestHandleOpenIDCallback(t *testing.T) {
 		}
 	})
 
+	t.Run("Missing claimed_id despite email and nickname -> 400 Bad Request", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+		store := NewMockStore(ctrl)
+
+		server := NewServer(store, nil, cookieManager, nil, nil, WithOpenIDProvider(openIDProvider))
+
+		cookieManager.EXPECT().
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "mock-state", Provider: "openid"}, nil)
+
+		cookieManager.EXPECT().
+			ClearAuthState(gomock.Any(), gomock.Any())
+
+		openIDProvider.EXPECT().
+			VerifyCallback(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(&openid.Claims{
+				Email:    "user@canonical.com",
+				Nickname: "nick",
+			}, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=mock-state", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "Failed to extract user ID") {
+			t.Errorf("Expected 'Failed to extract user ID', got %s", w.Body.String())
+		}
+	})
+
+	t.Run("Malformed claimed_id missing /+id/ prefix -> 400 Bad Request", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		openIDProvider := NewMockOpenIDProvider(ctrl)
+		store := NewMockStore(ctrl)
+
+		server := NewServer(store, nil, cookieManager, nil, nil, WithOpenIDProvider(openIDProvider))
+
+		cookieManager.EXPECT().
+			GetAuthState(gomock.Any()).
+			Return(&cookie.AuthState{State: "mock-state", Provider: "openid"}, nil)
+
+		cookieManager.EXPECT().
+			ClearAuthState(gomock.Any(), gomock.Any())
+
+		openIDProvider.EXPECT().
+			VerifyCallback(gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(&openid.Claims{
+				ClaimedID: "https://login.ubuntu.com/users/bad",
+				Email:     "user@canonical.com",
+			}, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/openid/callback?state=mock-state", nil)
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("Expected status 400, got %d", w.Code)
+		}
+	})
+
 	t.Run("Invalid return_to in state falls back to /", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
@@ -1361,7 +1437,8 @@ func TestHandleOpenIDCallback(t *testing.T) {
 			ClearAuthState(gomock.Any(), gomock.Any())
 
 		mockClaims := &openid.Claims{
-			Email: "testuser@example.com",
+			ClaimedID: "https://login.ubuntu.com/+id/user123",
+			Email:     "testuser@example.com",
 		}
 
 		openIDProvider.EXPECT().
@@ -1576,28 +1653,28 @@ func TestHandleSessions(t *testing.T) {
 		now := time.Now().UTC().Truncate(time.Second)
 		sessA := &session.Session{
 			SessionID:    "sess-a",
-			UserID:       "alice@canonical.com",
+			UserID:       "oidc-sub-alice",
 			Provider:     "oidc",
 			AccessToken:  "secret-access-token",
 			IDToken:      "secret-id-token",
 			RefreshToken: "secret-refresh-token",
-			Claims:       map[string]interface{}{"email": "alice@canonical.com"},
+			Claims:       map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"},
 			CreatedAt:    now.Add(-10 * time.Minute),
 			ExpiresAt:    now.Add(50 * time.Minute),
 		}
 		sessB := &session.Session{
 			SessionID:    "sess-b",
-			UserID:       "alice@canonical.com",
-			Provider:     "openid",
+			UserID:       "oidc-sub-alice",
+			Provider:     "oidc",
 			AccessToken:  "other-secret-token",
+			Claims:       map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"},
 			CreatedAt:    now.Add(-30 * time.Minute),
 			ExpiresAt:    now.Add(30 * time.Minute),
 		}
 
 		cm.EXPECT().Decode("session_id", "encoded-a", gomock.Any()).Return("sess-a", nil)
 		store.EXPECT().Get(gomock.Any(), "sess-a").Return(sessA, nil)
-		store.EXPECT().ListUserSessions(gomock.Any(), "alice@canonical.com").Return([]*session.Session{sessA, sessB}, nil)
-
+		store.EXPECT().ListUserSessions(gomock.Any(), "oidc-sub-alice").Return([]*session.Session{sessA, sessB}, nil)
 		req := httptest.NewRequest(http.MethodGet, "/auth/sessions", nil)
 		req.AddCookie(&http.Cookie{Name: "session_id", Value: "encoded-a"})
 		w := httptest.NewRecorder()
@@ -1626,7 +1703,7 @@ func TestHandleSessions(t *testing.T) {
 		if resp.Sessions[0].SessionID != "sess-a" || !resp.Sessions[0].IsCurrent || resp.Sessions[0].Provider != "oidc" {
 			t.Errorf("unexpected session[0]: %+v", resp.Sessions[0])
 		}
-		if resp.Sessions[1].SessionID != "sess-b" || resp.Sessions[1].IsCurrent || resp.Sessions[1].Provider != "openid" {
+		if resp.Sessions[1].SessionID != "sess-b" || resp.Sessions[1].IsCurrent || resp.Sessions[1].Provider != "oidc" {
 			t.Errorf("unexpected session[1]: %+v", resp.Sessions[1])
 		}
 	})
@@ -1670,6 +1747,33 @@ func TestHandleSessions(t *testing.T) {
 		assertPrivateJSONHeaders(t, w)
 	})
 
+	t.Run("Legacy inconsistent caller session returns 401 Unauthorized", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		store := NewMockStore(ctrl)
+		cm := NewMockAuthCookieManager(ctrl)
+		server := NewServer(store, nil, cm, nil, nil)
+
+		cm.EXPECT().Decode("session_id", "encoded-legacy", gomock.Any()).Return("sess-legacy", nil)
+		store.EXPECT().Get(gomock.Any(), "sess-legacy").Return(&session.Session{
+			SessionID: "sess-legacy",
+			UserID:    "alice@canonical.com",
+			Provider:  "oidc",
+		}, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/sessions", nil)
+		req.AddCookie(&http.Cookie{Name: "session_id", Value: "encoded-legacy"})
+		w := httptest.NewRecorder()
+
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", w.Code)
+		}
+		assertPrivateJSONHeaders(t, w)
+	})
+
 	t.Run("Store unavailable during ListUserSessions returns 503 Service Unavailable", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
@@ -1679,8 +1783,8 @@ func TestHandleSessions(t *testing.T) {
 		server := NewServer(store, nil, cm, nil, nil)
 
 		cm.EXPECT().Decode("session_id", "encoded-a", gomock.Any()).Return("sess-a", nil)
-		store.EXPECT().Get(gomock.Any(), "sess-a").Return(&session.Session{SessionID: "sess-a", UserID: "alice@canonical.com"}, nil)
-		store.EXPECT().ListUserSessions(gomock.Any(), "alice@canonical.com").Return(nil, errors.New("valkey connection refused"))
+		store.EXPECT().Get(gomock.Any(), "sess-a").Return(&session.Session{SessionID: "sess-a", UserID: "oidc-sub-alice", Provider: "oidc", Claims: map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"}}, nil)
+		store.EXPECT().ListUserSessions(gomock.Any(), "oidc-sub-alice").Return(nil, errors.New("valkey connection refused"))
 
 		req := httptest.NewRequest(http.MethodGet, "/auth/sessions", nil)
 		req.AddCookie(&http.Cookie{Name: "session_id", Value: "encoded-a"})
@@ -1706,8 +1810,8 @@ func TestHandleRevokeSession(t *testing.T) {
 		server := NewServer(store, nil, cm, nil, nil)
 
 		cm.EXPECT().Decode("session_id", "encoded-cur", gomock.Any()).Return("sess-cur", nil)
-		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "alice@canonical.com"}, nil)
-		store.EXPECT().DeleteUserSession(gomock.Any(), "alice@canonical.com", "sess-other").Return(nil)
+		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "oidc-sub-alice", Provider: "oidc", Claims: map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"}}, nil)
+		store.EXPECT().DeleteUserSession(gomock.Any(), "oidc-sub-alice", "sess-other").Return(nil)
 		// ClearSessionCookie must NOT be called when revoking another session.
 
 		req := httptest.NewRequest(http.MethodDelete, "/auth/sessions/sess-other", nil)
@@ -1736,8 +1840,8 @@ func TestHandleRevokeSession(t *testing.T) {
 		server := NewServer(store, nil, cm, nil, nil)
 
 		cm.EXPECT().Decode("session_id", "encoded-cur", gomock.Any()).Return("sess-cur", nil)
-		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "alice@canonical.com"}, nil)
-		store.EXPECT().DeleteUserSession(gomock.Any(), "alice@canonical.com", "sess-cur").Return(nil)
+		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "oidc-sub-alice", Provider: "oidc", Claims: map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"}}, nil)
+		store.EXPECT().DeleteUserSession(gomock.Any(), "oidc-sub-alice", "sess-cur").Return(nil)
 		cm.EXPECT().ClearSessionCookie(gomock.Any(), gomock.Any())
 
 		req := httptest.NewRequest(http.MethodDelete, "/auth/sessions/sess-cur", nil)
@@ -1762,8 +1866,8 @@ func TestHandleRevokeSession(t *testing.T) {
 		server := NewServer(store, nil, cm, nil, nil)
 
 		cm.EXPECT().Decode("session_id", "encoded-cur", gomock.Any()).Return("sess-cur", nil)
-		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "alice@canonical.com"}, nil)
-		store.EXPECT().DeleteUserSession(gomock.Any(), "alice@canonical.com", "sess-bob").Return(session.ErrSessionNotFound)
+		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "oidc-sub-alice", Provider: "oidc", Claims: map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"}}, nil)
+		store.EXPECT().DeleteUserSession(gomock.Any(), "oidc-sub-alice", "sess-bob").Return(session.ErrSessionNotFound)
 
 		req := httptest.NewRequest(http.MethodDelete, "/auth/sessions/sess-bob", nil)
 		req.AddCookie(&http.Cookie{Name: "session_id", Value: "encoded-cur"})
@@ -1786,8 +1890,8 @@ func TestHandleRevokeSession(t *testing.T) {
 		server := NewServer(store, nil, cm, nil, nil)
 
 		cm.EXPECT().Decode("session_id", "encoded-cur", gomock.Any()).Return("sess-cur", nil)
-		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "alice@canonical.com"}, nil)
-		store.EXPECT().DeleteUserSession(gomock.Any(), "alice@canonical.com", "sess-missing").Return(session.ErrSessionNotFound)
+		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "oidc-sub-alice", Provider: "oidc", Claims: map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"}}, nil)
+		store.EXPECT().DeleteUserSession(gomock.Any(), "oidc-sub-alice", "sess-missing").Return(session.ErrSessionNotFound)
 
 		req := httptest.NewRequest(http.MethodDelete, "/auth/sessions/sess-missing", nil)
 		req.AddCookie(&http.Cookie{Name: "session_id", Value: "encoded-cur"})
@@ -1847,8 +1951,8 @@ func TestHandleRevokeAllSessions(t *testing.T) {
 		server := NewServer(store, nil, cm, nil, nil)
 
 		cm.EXPECT().Decode("session_id", "encoded-cur", gomock.Any()).Return("sess-cur", nil)
-		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "alice@canonical.com"}, nil)
-		store.EXPECT().RevokeUserSessionsExcept(gomock.Any(), "alice@canonical.com", "").Return(3, nil)
+		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "oidc-sub-alice", Provider: "oidc", Claims: map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"}}, nil)
+		store.EXPECT().RevokeUserSessionsExcept(gomock.Any(), "oidc-sub-alice", "").Return(3, nil)
 		cm.EXPECT().ClearSessionCookie(gomock.Any(), gomock.Any())
 
 		req := httptest.NewRequest(http.MethodDelete, "/auth/sessions", nil)
@@ -1877,8 +1981,8 @@ func TestHandleRevokeAllSessions(t *testing.T) {
 		server := NewServer(store, nil, cm, nil, nil)
 
 		cm.EXPECT().Decode("session_id", "encoded-cur", gomock.Any()).Return("sess-cur", nil)
-		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "alice@canonical.com"}, nil)
-		store.EXPECT().RevokeUserSessionsExcept(gomock.Any(), "alice@canonical.com", "sess-cur").Return(2, nil)
+		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "oidc-sub-alice", Provider: "oidc", Claims: map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"}}, nil)
+		store.EXPECT().RevokeUserSessionsExcept(gomock.Any(), "oidc-sub-alice", "sess-cur").Return(2, nil)
 		// ClearSessionCookie must NOT be called.
 
 		req := httptest.NewRequest(http.MethodDelete, "/auth/sessions?exclude_current=true", nil)
@@ -1910,7 +2014,7 @@ func TestHandleRevokeAllSessions(t *testing.T) {
 		server := NewServer(store, nil, cm, nil, nil)
 
 		cm.EXPECT().Decode("session_id", "encoded-cur", gomock.Any()).Return("sess-cur", nil)
-		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "alice@canonical.com"}, nil)
+		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "oidc-sub-alice", Provider: "oidc", Claims: map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"}}, nil)
 
 		req := httptest.NewRequest(http.MethodDelete, "/auth/sessions?exclude_current=notabool", nil)
 		req.AddCookie(&http.Cookie{Name: "session_id", Value: "encoded-cur"})
@@ -1968,8 +2072,8 @@ func TestHandleRevokeAllSessions(t *testing.T) {
 		server := NewServer(store, nil, cm, nil, nil)
 
 		cm.EXPECT().Decode("session_id", "encoded-cur", gomock.Any()).Return("sess-cur", nil)
-		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "alice@canonical.com"}, nil)
-		store.EXPECT().RevokeUserSessionsExcept(gomock.Any(), "alice@canonical.com", "").Return(0, errors.New("valkey down"))
+		store.EXPECT().Get(gomock.Any(), "sess-cur").Return(&session.Session{SessionID: "sess-cur", UserID: "oidc-sub-alice", Provider: "oidc", Claims: map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"}}, nil)
+		store.EXPECT().RevokeUserSessionsExcept(gomock.Any(), "oidc-sub-alice", "").Return(0, errors.New("valkey down"))
 
 		req := httptest.NewRequest(http.MethodDelete, "/auth/sessions", nil)
 		req.AddCookie(&http.Cookie{Name: "session_id", Value: "encoded-cur"})
@@ -2006,28 +2110,31 @@ func TestNewServerWithObservability(t *testing.T) {
 
 func TestHandleCallback_ClaimsNormalizationAndTenant(t *testing.T) {
 	tests := []struct {
-		name        string
-		tenantClaim string
-		rawClaims   map[string]interface{}
-		wantReject  bool
-		wantUserID  string
-		wantClaims  map[string]interface{}
+		name         string
+		tenantClaim  string
+		u1SSOIDClaim string
+		rawClaims    map[string]interface{}
+		wantReject   bool
+		wantUserID   string
+		wantClaims   map[string]interface{}
 	}{
 		{
-			name:        "full OIDC profile and default tenant",
+			name:        "full OIDC profile, default tenant, and default u1_sso_id",
 			tenantClaim: "",
 			rawClaims: map[string]interface{}{
 				"sub":                "sub-123",
 				"email":              "alice@canonical.com",
+				"u1_sso_id":          "alice123",
 				"name":               "Alice Smith",
 				"given_name":         "Alice",
 				"preferred_username": "alice",
 				"tenant":             "canonical",
 			},
-			wantUserID: "alice@canonical.com",
+			wantUserID: "sub-123",
 			wantClaims: map[string]interface{}{
 				"sub":                "sub-123",
 				"email":              "alice@canonical.com",
+				"u1_sso_id":          "alice123",
 				"name":               "Alice Smith",
 				"given_name":         "Alice",
 				"preferred_username": "alice",
@@ -2036,19 +2143,22 @@ func TestHandleCallback_ClaimsNormalizationAndTenant(t *testing.T) {
 			},
 		},
 		{
-			name:        "custom tenant claim and given_name+family_name fallback",
-			tenantClaim: "org",
+			name:         "custom tenant and u1_sso_id claims with given_name+family_name fallback",
+			tenantClaim:  "org",
+			u1SSOIDClaim: "ubuntu_one_id",
 			rawClaims: map[string]interface{}{
-				"sub":         "sub-456",
-				"email":       "bob@canonical.com",
-				"given_name":  "Bob",
-				"family_name": "Jones",
-				"org":         "engineering",
+				"sub":           "sub-456",
+				"email":         "bob@canonical.com",
+				"ubuntu_one_id": "bob456",
+				"given_name":    "Bob",
+				"family_name":   "Jones",
+				"org":           "engineering",
 			},
-			wantUserID: "bob@canonical.com",
+			wantUserID: "sub-456",
 			wantClaims: map[string]interface{}{
 				"sub":          "sub-456",
 				"email":        "bob@canonical.com",
+				"u1_sso_id":    "bob456",
 				"name":         "Bob Jones",
 				"given_name":   "Bob",
 				"tenant":       "engineering",
@@ -2056,14 +2166,17 @@ func TestHandleCallback_ClaimsNormalizationAndTenant(t *testing.T) {
 			},
 		},
 		{
-			name:        "minimal claims and non-string tenant ignored",
+			name:        "minimal claims and non-string tenant and URL-formatted u1_sso_id ignored",
 			tenantClaim: "tenant",
 			rawClaims: map[string]interface{}{
-				"email":  "carol@canonical.com",
-				"tenant": []string{"a", "b"},
+				"sub":       "sub-789",
+				"email":     "carol@canonical.com",
+				"tenant":    []string{"a", "b"},
+				"u1_sso_id": "https://login.ubuntu.com/+id/carol789",
 			},
-			wantUserID: "carol@canonical.com",
+			wantUserID: "sub-789",
 			wantClaims: map[string]interface{}{
+				"sub":          "sub-789",
 				"email":        "carol@canonical.com",
 				"idp_provider": "oidc",
 			},
@@ -2076,12 +2189,23 @@ func TestHandleCallback_ClaimsNormalizationAndTenant(t *testing.T) {
 				"email":          "dave@canonical.com",
 				"email_verified": "true",
 			},
-			wantUserID: "dave@canonical.com",
+			wantUserID: "oidc-sub-str-true",
 			wantClaims: map[string]interface{}{
 				"sub":          "oidc-sub-str-true",
 				"email":        "dave@canonical.com",
 				"idp_provider": "oidc",
 			},
+		},
+		{
+			name:        "missing sub despite verified email rejects login without fallback",
+			tenantClaim: "tenant",
+			rawClaims: map[string]interface{}{
+				"email":              "alice@canonical.com",
+				"email_verified":     true,
+				"preferred_username": "alice",
+				"nickname":           "alice",
+			},
+			wantReject: true,
 		},
 		{
 			name:        "unverified email_verified=false rejects login without fallback",
@@ -2143,6 +2267,9 @@ func TestHandleCallback_ClaimsNormalizationAndTenant(t *testing.T) {
 			var opts []ServerOption
 			if tc.tenantClaim != "" {
 				opts = append(opts, WithTenantClaim(tc.tenantClaim))
+			}
+			if tc.u1SSOIDClaim != "" {
+				opts = append(opts, WithU1SSOIDClaim(tc.u1SSOIDClaim))
 			}
 			server := NewServer(store, nil, cookieManager, oidcProvider, nil, opts...)
 
@@ -2235,15 +2362,18 @@ func TestHandleMe(t *testing.T) {
 		cookieManager.EXPECT().Decode("session_id", "enc-cookie", gomock.Any()).Return("sess-1", nil)
 		store.EXPECT().Get(gomock.Any(), "sess-1").Return(&session.Session{
 			SessionID:    "sess-1",
-			UserID:       "alice@canonical.com",
+			UserID:       "oidc-sub-1",
+			Provider:     "oidc",
 			AccessToken:  "secret-access",
 			IDToken:      "secret-id",
 			RefreshToken: "secret-refresh",
 			Claims: map[string]interface{}{
-				"email":    "alice@canonical.com",
-				"name":     "Alice Smith",
-				"tenant":   "canonical",
-				"nickname": "alice",
+				"sub":       "oidc-sub-1",
+				"email":     "alice@canonical.com",
+				"u1_sso_id": "alice123",
+				"name":      "Alice Smith",
+				"tenant":    "canonical",
+				"nickname":  "alice",
 			},
 		}, nil)
 
@@ -2265,7 +2395,7 @@ func TestHandleMe(t *testing.T) {
 			t.Errorf("authenticated = %v, want true", body["authenticated"])
 		}
 		user := body["user"].(map[string]interface{})
-		if user["id"] != "alice@canonical.com" || user["email"] != "alice@canonical.com" || user["name"] != "Alice Smith" || user["tenant"] != "canonical" {
+		if user["id"] != "oidc-sub-1" || user["email"] != "alice@canonical.com" || user["u1_sso_id"] != "alice123" || user["name"] != "Alice Smith" || user["tenant"] != "canonical" {
 			t.Errorf("unexpected user payload: %#v", user)
 		}
 		for _, forbidden := range []string{"secret-access", "secret-id", "secret-refresh", "sess-1", "nickname"} {
@@ -2275,7 +2405,7 @@ func TestHandleMe(t *testing.T) {
 		}
 	})
 
-	t.Run("OpenID session without tenant omits tenant -> 200", func(t *testing.T) {
+	t.Run("OpenID session omits id and tenant and exposes u1_sso_id -> 200", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
@@ -2286,11 +2416,12 @@ func TestHandleMe(t *testing.T) {
 		cookieManager.EXPECT().Decode("session_id", "enc-cookie", gomock.Any()).Return("sess-2", nil)
 		store.EXPECT().Get(gomock.Any(), "sess-2").Return(&session.Session{
 			SessionID: "sess-2",
-			UserID:    "u1@canonical.com",
+			UserID:    "Xb6LTdm",
 			Provider:  "openid",
 			Claims: map[string]interface{}{
-				"email": "u1@canonical.com",
-				"name":  "Ubuntu User",
+				"email":     "u1@canonical.com",
+				"u1_sso_id": "Xb6LTdm",
+				"name":      "Ubuntu User",
 			},
 		}, nil)
 
@@ -2307,12 +2438,81 @@ func TestHandleMe(t *testing.T) {
 		var body map[string]interface{}
 		_ = json.Unmarshal(w.Body.Bytes(), &body)
 		user := body["user"].(map[string]interface{})
+		if _, exists := user["id"]; exists {
+			t.Errorf("expected id to be omitted for OpenID session, got %#v", user["id"])
+		}
+		if user["u1_sso_id"] != "Xb6LTdm" {
+			t.Errorf("u1_sso_id = %v, want Xb6LTdm", user["u1_sso_id"])
+		}
+		if user["email"] != "u1@canonical.com" || user["name"] != "Ubuntu User" {
+			t.Errorf("unexpected user payload: %#v", user)
+		}
 		if _, exists := user["tenant"]; exists {
 			t.Errorf("expected tenant to be omitted, got %#v", user["tenant"])
 		}
 	})
 
-	t.Run("Session without email claim in Claims map omits email -> 200", func(t *testing.T) {
+	t.Run("Legacy OpenID session without u1_sso_id -> 401", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		store := NewMockStore(ctrl)
+		server := NewServer(store, nil, cookieManager, nil, nil)
+
+		cookieManager.EXPECT().Decode("session_id", "enc-cookie", gomock.Any()).Return("legacy-openid", nil)
+		store.EXPECT().Get(gomock.Any(), "legacy-openid").Return(&session.Session{
+			SessionID: "legacy-openid",
+			UserID:    "u1@canonical.com",
+			Provider:  "openid",
+			Claims: map[string]interface{}{
+				"email":      "u1@canonical.com",
+				"claimed_id": "https://login.ubuntu.com/+id/Xb6LTdm",
+			},
+		}, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+		req.AddCookie(&http.Cookie{Name: "session_id", Value: "enc-cookie"})
+		w := httptest.NewRecorder()
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", w.Code)
+		}
+		assertSecurityHeaders(t, w)
+	})
+
+	t.Run("Legacy OIDC session with mismatched sub and UserID -> 401", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		cookieManager := NewMockAuthCookieManager(ctrl)
+		store := NewMockStore(ctrl)
+		server := NewServer(store, nil, cookieManager, nil, nil)
+
+		cookieManager.EXPECT().Decode("session_id", "enc-cookie", gomock.Any()).Return("legacy-oidc", nil)
+		store.EXPECT().Get(gomock.Any(), "legacy-oidc").Return(&session.Session{
+			SessionID: "legacy-oidc",
+			UserID:    "alice@canonical.com",
+			Provider:  "oidc",
+			Claims: map[string]interface{}{
+				"sub":   "oidc-sub-1",
+				"email": "alice@canonical.com",
+			},
+		}, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+		req.AddCookie(&http.Cookie{Name: "session_id", Value: "enc-cookie"})
+		w := httptest.NewRecorder()
+		server.Router().ServeHTTP(w, req)
+
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", w.Code)
+		}
+		assertSecurityHeaders(t, w)
+	})
+
+	t.Run("Minimal OIDC session with sub and email omits absent optional fields -> 200", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
@@ -2323,10 +2523,11 @@ func TestHandleMe(t *testing.T) {
 		cookieManager.EXPECT().Decode("session_id", "enc-cookie", gomock.Any()).Return("sess-3", nil)
 		store.EXPECT().Get(gomock.Any(), "sess-3").Return(&session.Session{
 			SessionID: "sess-3",
-			UserID:    "u1_nick",
-			Provider:  "openid",
+			UserID:    "oidc-sub-3",
+			Provider:  "oidc",
 			Claims: map[string]interface{}{
-				"nickname": "u1_nick",
+				"sub":   "oidc-sub-3",
+				"email": "alice@canonical.com",
 			},
 		}, nil)
 
@@ -2341,15 +2542,17 @@ func TestHandleMe(t *testing.T) {
 		var body map[string]interface{}
 		_ = json.Unmarshal(w.Body.Bytes(), &body)
 		user := body["user"].(map[string]interface{})
-		if user["id"] != "u1_nick" {
-			t.Errorf("id = %v, want u1_nick", user["id"])
+		if user["id"] != "oidc-sub-3" || user["email"] != "alice@canonical.com" {
+			t.Errorf("unexpected user payload: %#v", user)
 		}
-		if _, exists := user["email"]; exists {
-			t.Errorf("expected email to be omitted, got %#v", user["email"])
+		for _, absent := range []string{"name", "tenant", "u1_sso_id"} {
+			if _, exists := user[absent]; exists {
+				t.Errorf("expected %s to be omitted, got %#v", absent, user[absent])
+			}
 		}
 	})
 
-	t.Run("Session with nil Claims omits email even if UserID contains @ -> 200", func(t *testing.T) {
+	t.Run("Claimless legacy OIDC session -> 401", func(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		defer ctrl.Finish()
 
@@ -2361,6 +2564,7 @@ func TestHandleMe(t *testing.T) {
 		store.EXPECT().Get(gomock.Any(), "sess-4").Return(&session.Session{
 			SessionID: "sess-4",
 			UserID:    "unverified@upn.example.com",
+			Provider:  "oidc",
 		}, nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
@@ -2368,18 +2572,10 @@ func TestHandleMe(t *testing.T) {
 		w := httptest.NewRecorder()
 		server.Router().ServeHTTP(w, req)
 
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200", w.Code)
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", w.Code)
 		}
-		var body map[string]interface{}
-		_ = json.Unmarshal(w.Body.Bytes(), &body)
-		user := body["user"].(map[string]interface{})
-		if user["id"] != "unverified@upn.example.com" {
-			t.Errorf("id = %v, want unverified@upn.example.com", user["id"])
-		}
-		if _, exists := user["email"]; exists {
-			t.Errorf("expected email to be omitted when Claims has no email, got %#v", user["email"])
-		}
+		assertSecurityHeaders(t, w)
 	})
 
 	t.Run("Missing cookie -> 401", func(t *testing.T) {
@@ -2504,7 +2700,7 @@ func TestHandleCallback_ReauthCleansUpPreviousSession(t *testing.T) {
 	idToken.EXPECT().GetNonce().Return("n1", nil)
 	idToken.EXPECT().Claims(gomock.Any()).DoAndReturn(func(v interface{}) error {
 		ptr := v.(*map[string]interface{})
-		*ptr = map[string]interface{}{"email": "alice@canonical.com"}
+		*ptr = map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"}
 		return nil
 	})
 	oauth2Token.EXPECT().AccessToken().Return("at")
@@ -2549,8 +2745,9 @@ func TestHandleOpenIDCallback_ReauthCleansUpPreviousSessionAndRecordsMetric(t *t
 	cookieManager.EXPECT().GetAuthState(gomock.Any()).Return(&cookie.AuthState{State: "st1", ReturnTo: "/", Provider: "openid"}, nil)
 	cookieManager.EXPECT().ClearAuthState(gomock.Any(), gomock.Any())
 	openIDProvider.EXPECT().VerifyCallback(gomock.Any(), gomock.Any(), gomock.Any()).Return(&openid.Claims{
-		Email:    "alice@canonical.com",
-		FullName: "Alice Smith",
+		ClaimedID: "https://login.ubuntu.com/+id/alice",
+		Email:     "alice@canonical.com",
+		FullName:  "Alice Smith",
 	}, nil)
 	store.EXPECT().Set(gomock.Any(), gomock.Any()).Return(nil)
 	gomock.InOrder(

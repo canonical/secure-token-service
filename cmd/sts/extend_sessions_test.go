@@ -53,7 +53,9 @@ func TestExtendOneSession_DryRun(t *testing.T) {
 
 	sess := &session.Session{
 		SessionID:    "sess-2",
-		UserID:       "user-2",
+		UserID:       "oidc-sub-2",
+		Provider:     "oidc",
+		Claims:       map[string]interface{}{"sub": "oidc-sub-2", "email": "user2@canonical.com"},
 		AccessToken:  "access",
 		RefreshToken: "refresh-token",
 	}
@@ -88,7 +90,9 @@ func TestExtendOneSession_SetError(t *testing.T) {
 
 	sess := &session.Session{
 		SessionID:    "sess-3",
-		UserID:       "user-3",
+		UserID:       "oidc-sub-3",
+		Provider:     "oidc",
+		Claims:       map[string]interface{}{"sub": "oidc-sub-3", "email": "user3@canonical.com"},
 		RefreshToken: "refresh-token",
 	}
 
@@ -163,7 +167,9 @@ func TestExtendOneSession_UpdatesExpiresAtFromTTL(t *testing.T) {
 
 	sess := &session.Session{
 		SessionID:    "sess-extend-1",
-		UserID:       "alice@canonical.com",
+		UserID:       "oidc-sub-alice",
+		Provider:     "oidc",
+		Claims:       map[string]interface{}{"sub": "oidc-sub-alice", "email": "alice@canonical.com"},
 		RefreshToken: "old-refresh",
 	}
 	oauthCfg := &oauth2.Config{
@@ -187,5 +193,24 @@ func TestExtendOneSession_UpdatesExpiresAtFromTTL(t *testing.T) {
 	}
 	if gotTTL != ttl {
 		t.Errorf("WithTTL option = %v, want %v", gotTTL, ttl)
+	}
+}
+
+func TestExtendOneSession_RejectsInvalidIdentity(t *testing.T) {
+	t.Parallel()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	sess := &session.Session{
+		SessionID:    "sess-legacy",
+		UserID:       "alice@canonical.com",
+		Provider:     "oidc",
+		RefreshToken: "old-refresh",
+	}
+
+	_, err := extendOneSession(context.Background(), NewMockStore(ctrl), &oauth2.Config{}, sess, time.Hour, true)
+	if err == nil {
+		t.Fatal("expected error for legacy/invalid session identity, got nil")
 	}
 }

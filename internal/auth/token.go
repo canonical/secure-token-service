@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/canonical/secure-token-service/internal/db"
@@ -166,15 +167,20 @@ func (km *KeyManager) MintToken(subject, issuer, audience string, expirySeconds 
 	now := time.Now()
 
 	// Merge custom claims first so registered STS claims (iss, sub, aud, iat, exp)
-	// cannot be overwritten by upstream IdP claims (e.g., an OIDC "sub" claim must
-	// never override the resolved Session.UserID subject).
+	// cannot be overwritten by upstream IdP claims. When subject is empty (e.g.
+	// OpenID 2.0 sessions without an OIDC subject), explicitly delete any custom
+	// "sub" claim so the minted JWT omits "sub".
 	tokenClaims := jwt.MapClaims{}
 	for k, v := range claims {
 		tokenClaims[k] = v
 	}
 
 	tokenClaims["iss"] = issuer
-	tokenClaims["sub"] = subject
+	if trimmedSub := strings.TrimSpace(subject); trimmedSub != "" {
+		tokenClaims["sub"] = trimmedSub
+	} else {
+		delete(tokenClaims, "sub")
+	}
 	tokenClaims["aud"] = audience
 	tokenClaims["iat"] = now.Unix()
 	tokenClaims["exp"] = now.Add(time.Duration(expirySeconds) * time.Second).Unix()

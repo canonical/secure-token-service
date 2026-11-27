@@ -120,3 +120,53 @@ func TestKeyManager_MintToken_StandardClaimsCannotBeOverwritten(t *testing.T) {
 		t.Errorf("exp = %v, iat = %v, want exp-iat == 3600", claims["exp"], claims["iat"])
 	}
 }
+
+func TestKeyManager_MintToken_EmptySubjectOmitsSubClaim(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	km, err := NewKeyManager(ctx, &stubJWKSRepo{}, nil, 0)
+	if err != nil {
+		t.Fatalf("NewKeyManager failed: %v", err)
+	}
+
+	customClaims := map[string]interface{}{
+		"sub":       "spoofed-sub",
+		"email":     "alice@canonical.com",
+		"u1_sso_id": "Xb6LTdm",
+	}
+
+	tokenStr, err := km.MintToken("", "sts-issuer", "internal-services", 3600, customClaims)
+	if err != nil {
+		t.Fatalf("MintToken failed: %v", err)
+	}
+
+	pubKey, err := km.GetPublicKey()
+	if err != nil {
+		t.Fatalf("GetPublicKey failed: %v", err)
+	}
+
+	parsed, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+		return pubKey, nil
+	}, jwt.WithValidMethods([]string{"ES256"}))
+	if err != nil || !parsed.Valid {
+		t.Fatalf("failed to verify minted JWT: %v", err)
+	}
+
+	claims := parsed.Claims.(jwt.MapClaims)
+	if _, exists := claims["sub"]; exists {
+		t.Errorf("expected sub claim to be omitted when subject is empty, got %v", claims["sub"])
+	}
+	if claims["email"] != "alice@canonical.com" {
+		t.Errorf("email = %v, want alice@canonical.com", claims["email"])
+	}
+	if claims["u1_sso_id"] != "Xb6LTdm" {
+		t.Errorf("u1_sso_id = %v, want Xb6LTdm", claims["u1_sso_id"])
+	}
+	if claims["iss"] != "sts-issuer" {
+		t.Errorf("iss = %v, want sts-issuer", claims["iss"])
+	}
+	if claims["aud"] != "internal-services" {
+		t.Errorf("aud = %v, want internal-services", claims["aud"])
+	}
+}

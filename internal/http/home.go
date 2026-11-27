@@ -477,11 +477,11 @@ func renderAuthenticatedHome(w http.ResponseWriter, sess *session.Session) {
     </div>
 </body>
 </html>`,
-		sess.UserID,
-		sess.UserID,
+		html.EscapeString(sess.UserID),
+		html.EscapeString(sess.UserID),
 		html.EscapeString(provider),
 		html.EscapeString(providerDisplayName),
-		sess.SessionID,
+		html.EscapeString(sess.SessionID),
 		getStatusClass(sess.ExpiresAt),
 		getStatusText(sess.ExpiresAt),
 		sess.ExpiresAt.Format("2006-01-02 15:04:05 MST"),
