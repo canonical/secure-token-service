@@ -12,7 +12,7 @@ require (
 	github.com/jwx-go/jwkfetch/v4 v4.0.4
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/lestrrat-go/httprc/v3 v3.0.6
-	github.com/lestrrat-go/jwx/v4 v4.6.0
+	github.com/lestrrat-go/jwx/v4 v4.7.0
 	github.com/pressly/goose/v3 v3.30.1
 	github.com/prometheus/client_golang v1.25.0
 	github.com/spf13/cobra v1.10.2
